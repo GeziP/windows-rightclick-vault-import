@@ -139,7 +139,6 @@ pub fn handle_config_show(app: &App) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
 
     use rusqlite::Connection;
 
@@ -193,7 +192,7 @@ mod tests {
         let empty_dir = temp.path().join("empty");
         fs::create_dir(&empty_dir).unwrap();
 
-        let err = handle_import(&app, vec![PathBuf::from(empty_dir)]).unwrap_err();
+        let err = handle_import(&app, vec![empty_dir]).unwrap_err();
 
         assert!(err.to_string().contains("no importable files found"));
     }

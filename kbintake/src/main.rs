@@ -1,17 +1,7 @@
-mod adapter;
-mod agent;
-mod app;
-mod cli;
-mod config;
-mod db;
-mod domain;
-mod logging;
-mod processor;
-mod queue;
-
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands};
+use kbintake::cli::{Cli, Commands};
+use kbintake::{agent, app, cli, logging};
 
 fn main() -> Result<()> {
     logging::init_logging()?;

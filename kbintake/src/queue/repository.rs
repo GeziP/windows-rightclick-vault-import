@@ -329,16 +329,17 @@ mod tests {
     fn repo_with_conn() -> (Connection, BatchJob, ItemJob) {
         let conn = Connection::open_in_memory().unwrap();
         db::init_schema(&conn).unwrap();
-        let repo = Repository::new(&conn);
         let batch = BatchJob::new("test", "default", 1);
         let item = ItemJob::new(
             batch.batch_id.clone(),
             batch.target_id.clone(),
             PathBuf::from("source.md"),
         );
-        repo.insert_batch(&batch).unwrap();
-        repo.insert_item(&item).unwrap();
-        drop(repo);
+        {
+            let repo = Repository::new(&conn);
+            repo.insert_batch(&batch).unwrap();
+            repo.insert_item(&item).unwrap();
+        }
         (conn, batch, item)
     }
 

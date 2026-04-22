@@ -100,3 +100,6 @@ Goal: make the MVP testable, diagnosable, and safe for local use.
 - GitHub issue tracking is available; MVP processing loop work is tracked in issue #25.
 - Rust build/test tooling is available in the current shell.
 - The CLI import and one-shot agent path has focused unit coverage for scanning, queue state, deterministic copy conflicts, duplicate detection, invalid sources, and partial-import rejection.
+- Integration tests cover config bootstrap, idempotent schema initialization, import enqueue, successful agent drain, and duplicate handling.
+- CI workflow coverage is defined for Windows with formatting, clippy, build, and test gates.
+- Explorer registration now includes unregister scripts plus README install, registration, verification, and rollback guidance.

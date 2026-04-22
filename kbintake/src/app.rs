@@ -12,6 +12,15 @@ pub struct App {
 impl App {
     pub fn bootstrap() -> Result<Self> {
         let config = AppConfig::load_or_init()?;
+        Self::bootstrap_with_config(config)
+    }
+
+    pub fn bootstrap_in(app_data_dir: impl Into<std::path::PathBuf>) -> Result<Self> {
+        let config = AppConfig::load_or_init_in(app_data_dir.into())?;
+        Self::bootstrap_with_config(config)
+    }
+
+    fn bootstrap_with_config(config: AppConfig) -> Result<Self> {
         let db_path = config.app_data_dir.join("data").join("kbintake.db");
 
         if let Some(parent) = db_path.parent() {

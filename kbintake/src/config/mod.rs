@@ -22,6 +22,10 @@ impl AppConfig {
         let app_data_dir = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("kbintake");
+        Self::load_or_init_in(app_data_dir)
+    }
+
+    pub fn load_or_init_in(app_data_dir: PathBuf) -> Result<Self> {
         let config_path = app_data_dir.join("config.toml");
 
         if config_path.exists() {
