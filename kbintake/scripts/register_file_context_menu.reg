@@ -1,0 +1,7 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Software\Classes\*\shell\KBIntake]
+@="Add to Knowledge Base"
+
+[HKEY_CURRENT_USER\Software\Classes\*\shell\KBIntake\command]
+@="\"C:\\Path\\To\\kbintake.exe\" import \"%1\""

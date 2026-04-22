@@ -1,0 +1,12 @@
+# Rust build output
+/kbintake/target/
+
+# Local runtime state
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Editor and OS noise
+.DS_Store
+Thumbs.db
