@@ -45,6 +45,18 @@ CREATE TABLE IF NOT EXISTS manifest_records (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_manifest_target_hash
 ON manifest_records(target_id, sha256);
 
+CREATE INDEX IF NOT EXISTS idx_batches_created_at
+ON batches(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_items_batch
+ON items(batch_id);
+
+CREATE INDEX IF NOT EXISTS idx_items_status_created_at
+ON items(status, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_items_target_hash
+ON items(target_id, sha256);
+
 CREATE TABLE IF NOT EXISTS events (
     event_id TEXT PRIMARY KEY,
     entity_type TEXT NOT NULL,

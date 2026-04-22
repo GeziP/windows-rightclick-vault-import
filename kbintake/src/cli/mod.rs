@@ -121,6 +121,8 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
 
 pub fn handle_doctor(app: &App) -> Result<()> {
     let target = app.config.default_target()?;
+    let conn = app.open_conn()?;
+    crate::db::validate_schema(&conn)?;
     println!("Config dir: {}", app.config.app_data_dir.display());
     println!("Database: {}", app.db_path.display());
     println!(
@@ -128,6 +130,7 @@ pub fn handle_doctor(app: &App) -> Result<()> {
         target.name,
         target.root_path.display()
     );
+    println!("Schema: ok");
     Ok(())
 }
 

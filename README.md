@@ -66,4 +66,5 @@ After unregistering, the `reg query` commands above should report that the keys 
 
 - [Contributor guide](AGENTS.md)
 - [Development roadmap](docs/ROADMAP.md)
+- [v0.1 release checklist](docs/RELEASE_CHECKLIST.md)
 - [Rust scaffold](kbintake_rust_scaffold.md)

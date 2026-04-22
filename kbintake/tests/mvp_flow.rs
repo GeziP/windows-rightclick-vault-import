@@ -47,10 +47,16 @@ fn bootstrap_initializes_database_schema_idempotently() {
     for table in ["batches", "items", "manifest_records", "events"] {
         assert_eq!(sqlite_object_count(&conn, "table", table), 1);
     }
-    assert_eq!(
-        sqlite_object_count(&conn, "index", "idx_manifest_target_hash"),
-        1
-    );
+    for index in [
+        "idx_manifest_target_hash",
+        "idx_batches_created_at",
+        "idx_items_batch",
+        "idx_items_status_created_at",
+        "idx_items_target_hash",
+    ] {
+        assert_eq!(sqlite_object_count(&conn, "index", index), 1);
+    }
+    kbintake::db::validate_schema(&conn).unwrap();
 
     let batch_count: i64 = conn
         .query_row(

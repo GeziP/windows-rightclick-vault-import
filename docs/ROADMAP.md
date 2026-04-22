@@ -103,3 +103,4 @@ Goal: make the MVP testable, diagnosable, and safe for local use.
 - Integration tests cover config bootstrap, idempotent schema initialization, import enqueue, successful agent drain, and duplicate handling.
 - CI workflow coverage is defined for Windows with formatting, clippy, build, and test gates.
 - Explorer registration now includes unregister scripts plus README install, registration, verification, and rollback guidance.
+- v0.1 release validation is tracked in `docs/RELEASE_CHECKLIST.md`.
