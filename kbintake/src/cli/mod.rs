@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use tracing::info;
 
 use crate::agent::scheduler;
@@ -41,6 +42,10 @@ pub enum Commands {
     Targets {
         #[command(subcommand)]
         command: TargetCommands,
+    },
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommands,
     },
     Config {
         #[command(subcommand)]
@@ -108,6 +113,15 @@ pub enum TargetCommands {
     SetDefault {
         #[arg(help = "Target ID or name")]
         target: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum VaultCommands {
+    #[command(about = "Show per-target vault import stats")]
+    Stats {
+        #[arg(long, help = "Output stats as JSON")]
+        json: bool,
     },
 }
 
@@ -515,6 +529,113 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
             Ok(())
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+struct VaultStatsRow {
+    target_id: String,
+    name: String,
+    root_path: String,
+    is_default: bool,
+    files_imported: i64,
+    storage_bytes: i64,
+    duplicate_count: i64,
+    duplicate_percent: f64,
+    failed_count: i64,
+    last_import_at: Option<String>,
+}
+
+pub fn handle_vault(app: &App, command: VaultCommands) -> Result<()> {
+    match command {
+        VaultCommands::Stats { json } => handle_vault_stats(app, json),
+    }
+}
+
+fn handle_vault_stats(app: &App, json: bool) -> Result<()> {
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+    let mut rows = Vec::new();
+    for (index, target) in app
+        .config
+        .targets
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.is_active())
+    {
+        let stats = repo.target_stats(&target.target_id)?;
+        let processed = stats.success_count + stats.duplicate_count;
+        let duplicate_percent = if processed == 0 {
+            0.0
+        } else {
+            (stats.duplicate_count as f64 * 100.0) / processed as f64
+        };
+        rows.push(VaultStatsRow {
+            target_id: target.target_id.clone(),
+            name: target.name.clone(),
+            root_path: target.root_path.display().to_string(),
+            is_default: index == 0,
+            files_imported: stats.imported_files,
+            storage_bytes: stats.storage_bytes,
+            duplicate_count: stats.duplicate_count,
+            duplicate_percent,
+            failed_count: stats.failed_count,
+            last_import_at: stats.last_import_at,
+        });
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+
+    if rows.is_empty() {
+        println!("No active targets configured.");
+        return Ok(());
+    }
+
+    for row in rows {
+        let default_marker = if row.is_default { " (default)" } else { "" };
+        println!("Target: {}{}", row.name, default_marker);
+        println!("  Path:          {}", row.root_path);
+        println!("  Files imported: {}", row.files_imported);
+        println!("  Storage used:  {}", format_bytes(row.storage_bytes));
+        println!(
+            "  Duplicates:    {:.0}%  ({} skipped)",
+            row.duplicate_percent, row.duplicate_count
+        );
+        println!("  Failed:        {}", row.failed_count);
+        println!(
+            "  Last import:   {}",
+            row.last_import_at
+                .as_deref()
+                .map(format_timestamp)
+                .unwrap_or("-".to_string())
+        );
+        println!();
+    }
+    Ok(())
+}
+
+fn format_bytes(bytes: i64) -> String {
+    let b = bytes.max(0) as f64;
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+    if b >= GB {
+        format!("{:.1} GB", b / GB)
+    } else if b >= MB {
+        format!("{:.1} MB", b / MB)
+    } else if b >= KB {
+        format!("{:.1} KB", b / KB)
+    } else {
+        format!("{} B", bytes.max(0))
+    }
+}
+
+fn format_timestamp(value: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|_| value.to_string())
 }
 
 #[cfg(test)]

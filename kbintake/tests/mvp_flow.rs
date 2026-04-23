@@ -555,6 +555,105 @@ fn cli_targets_remove_pending_jobs_returns_operation_rejected() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("ERROR [5]:"));
 }
 
+#[test]
+fn cli_vault_stats_json_empty_on_fresh_install() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["vault", "stats", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(value.is_array());
+    assert_eq!(value.as_array().unwrap().len(), 1);
+    assert_eq!(value[0]["files_imported"], 0);
+    assert_eq!(value[0]["failed_count"], 0);
+}
+
+#[test]
+fn cli_vault_stats_json_single_target_counts_imports() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("note.md");
+    fs::write(&source, "hello").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["vault", "stats", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value[0]["files_imported"], 1);
+    assert_eq!(value[0]["failed_count"], 0);
+    assert_eq!(value[0]["duplicate_count"], 0);
+}
+
+#[test]
+fn cli_vault_stats_json_multiple_targets() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let default_source = temp.path().join("default.md");
+    let archive_source = temp.path().join("archive.md");
+    let archive_path = temp.path().join("archive");
+    fs::create_dir(&archive_path).unwrap();
+    fs::write(&default_source, "hello default").unwrap();
+    fs::write(&archive_source, "hello archive").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "add", "archive"])
+        .arg(&archive_path)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&default_source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--target", "archive", "--process"])
+        .arg(&archive_source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["vault", "stats", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let rows = value.as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    let default = rows
+        .iter()
+        .find(|row| row["target_id"] == "default")
+        .unwrap();
+    let archive = rows
+        .iter()
+        .find(|row| row["target_id"] == "archive")
+        .unwrap();
+    assert_eq!(default["files_imported"], 1);
+    assert_eq!(archive["files_imported"], 1);
+    assert_eq!(default["failed_count"], 0);
+    assert_eq!(archive["failed_count"], 0);
+}
+
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {
     conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",

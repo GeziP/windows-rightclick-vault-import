@@ -43,6 +43,10 @@ fn main() -> ExitCode {
             .and_then(|app| cli::handle_config(&app, command))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
+        Commands::Vault { command } => app::App::bootstrap()
+            .and_then(|app| cli::handle_vault(&app, command))
+            .map(|()| exit_codes::SUCCESS)
+            .map_err(|err| (CommandKind::Vault, err)),
         Commands::Explorer { command } => cli::handle_explorer(command)
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Explorer, err)),
@@ -68,6 +72,7 @@ enum CommandKind {
     Import,
     Jobs(JobKind),
     Targets(TargetKind),
+    Vault,
     Config,
     Explorer,
     Doctor,

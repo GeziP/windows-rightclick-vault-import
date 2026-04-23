@@ -17,6 +17,7 @@ The current release is a local MVP: it scans files, queues import jobs in SQLite
 - Import into a specific target with `import --target <target>`.
 - Inspect batches and item details with `jobs list` and `jobs show`.
 - Retry failed items with `jobs retry <batch-id>`.
+- Inspect per-target import health with `vault stats` and `vault stats --json`.
 - Record audit events for queued, success, duplicate, failed, and retry transitions.
 - Register Windows Explorer file and directory context-menu entries with reviewable `.reg` scripts.
 - Run CI on Windows for format, clippy, build, and tests.
@@ -70,6 +71,7 @@ cargo run -- config set-target C:\Users\<user>\Documents\KnowledgeVault
 cargo run -- import C:\path\to\note.md
 cargo run -- agent
 cargo run -- jobs list
+cargo run -- vault stats
 ```
 
 Import and process in one command:
@@ -129,6 +131,7 @@ kbintake agent
 kbintake jobs list
 kbintake jobs show <batch-id>
 kbintake jobs retry <batch-id>
+kbintake vault stats [--json]
 ```
 
 ## Runtime State

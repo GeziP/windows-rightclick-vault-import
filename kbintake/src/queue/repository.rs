@@ -9,6 +9,16 @@ pub struct Repository<'a> {
     conn: &'a Connection,
 }
 
+#[derive(Debug, Clone)]
+pub struct TargetStats {
+    pub imported_files: i64,
+    pub storage_bytes: i64,
+    pub duplicate_count: i64,
+    pub success_count: i64,
+    pub failed_count: i64,
+    pub last_import_at: Option<String>,
+}
+
 impl<'a> Repository<'a> {
     pub fn new(conn: &'a Connection) -> Self {
         Self { conn }
@@ -142,6 +152,39 @@ impl<'a> Repository<'a> {
                 "SELECT COUNT(*) FROM items WHERE target_id = ?1 AND status = ?2",
                 params![target_id, state_machine::STATUS_QUEUED],
                 |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn target_stats(&self, target_id: &str) -> Result<TargetStats> {
+        self.conn
+            .query_row(
+                "SELECT
+                    (SELECT COUNT(*) FROM manifest_records WHERE target_id = ?1),
+                    (SELECT COALESCE(SUM(COALESCE(source_size, 0)), 0) FROM manifest_records WHERE target_id = ?1),
+                    (SELECT COUNT(*) FROM items WHERE target_id = ?1 AND status = ?2),
+                    (SELECT COUNT(*) FROM items WHERE target_id = ?1 AND status = ?3),
+                    (SELECT COUNT(*) FROM items WHERE target_id = ?1 AND status = ?4),
+                    (SELECT MAX(e.created_at)
+                     FROM events e
+                     JOIN items i ON i.item_id = e.entity_id
+                     WHERE e.entity_type = 'item' AND e.event_type = 'item.success' AND i.target_id = ?1)",
+                params![
+                    target_id,
+                    state_machine::STATUS_DUPLICATE,
+                    state_machine::STATUS_SUCCESS,
+                    state_machine::STATUS_FAILED
+                ],
+                |row| {
+                    Ok(TargetStats {
+                        imported_files: row.get(0)?,
+                        storage_bytes: row.get(1)?,
+                        duplicate_count: row.get(2)?,
+                        success_count: row.get(3)?,
+                        failed_count: row.get(4)?,
+                        last_import_at: row.get(5)?,
+                    })
+                },
             )
             .map_err(Into::into)
     }
