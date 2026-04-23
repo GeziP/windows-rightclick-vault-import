@@ -11,9 +11,16 @@ use crate::queue::repository::Repository;
 
 pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
     let source = PathBuf::from(&item.source_path);
-    let target = app.config.default_target()?;
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
+    let target = match app.config.target_by_id(&item.target_id) {
+        Ok(target) => target,
+        Err(err) => {
+            repo.mark_item_failed(&item.item_id, "E_TARGET_MISSING", &err.to_string())?;
+            error!(item_id = %item.item_id, target_id = %item.target_id, error = %err, "target lookup failed");
+            return Ok(());
+        }
+    };
 
     repo.update_item_running(&item.item_id, "validating")?;
     let size = match validator::validate_file(&source, app.config.import.max_file_size_mb) {

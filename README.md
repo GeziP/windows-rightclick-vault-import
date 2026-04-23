@@ -9,6 +9,8 @@ Install the Rust toolchain, then run commands from `kbintake/`:
 ```powershell
 cargo build
 cargo run -- doctor
+cargo run -- config show
+cargo run -- config set-target <vault-path>
 cargo run -- import <path>
 cargo run -- agent
 cargo run -- jobs list

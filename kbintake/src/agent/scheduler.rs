@@ -95,6 +95,23 @@ mod tests {
         batch_id
     }
 
+    fn insert_batch_with_target(
+        app: &App,
+        target_id: &str,
+        files: Vec<std::path::PathBuf>,
+    ) -> String {
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let batch = BatchJob::new("test", target_id, files.len() as i64);
+        let batch_id = batch.batch_id.clone();
+        repo.insert_batch(&batch).unwrap();
+        for file in files {
+            repo.insert_item(&ItemJob::new(batch_id.clone(), target_id.to_string(), file))
+                .unwrap();
+        }
+        batch_id
+    }
+
     #[test]
     fn drain_queue_imports_valid_item_and_marks_batch_success() {
         let temp = tempfile::tempdir().unwrap();
@@ -165,5 +182,48 @@ mod tests {
         assert_eq!(batch.status, state_machine::STATUS_FAILED);
         assert_eq!(items[0].status, state_machine::STATUS_FAILED);
         assert_eq!(items[0].error_code.as_deref(), Some("E_SOURCE_INVALID"));
+    }
+
+    #[test]
+    fn drain_queue_uses_item_target_not_current_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config.targets = vec![
+            Target::new("new-default", temp.path().join("new-vault")),
+            Target::new("old-default", temp.path().join("old-vault")),
+        ];
+        let source = temp.path().join("note.md");
+        fs::write(&source, "hello").unwrap();
+        let batch_id = insert_batch_with_target(&app, "old-default", vec![source]);
+
+        drain_queue(&app).unwrap();
+
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let items = repo.list_items_by_batch(&batch_id).unwrap();
+
+        assert_eq!(items[0].status, state_machine::STATUS_SUCCESS);
+        assert!(temp.path().join("old-vault").join("note.md").exists());
+        assert!(!temp.path().join("new-vault").join("note.md").exists());
+    }
+
+    #[test]
+    fn drain_queue_marks_missing_target_failed() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        let source = temp.path().join("note.md");
+        fs::write(&source, "hello").unwrap();
+        let batch_id = insert_batch_with_target(&app, "missing-target", vec![source]);
+
+        drain_queue(&app).unwrap();
+
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let batch = repo.get_batch(&batch_id).unwrap();
+        let items = repo.list_items_by_batch(&batch_id).unwrap();
+
+        assert_eq!(batch.status, state_machine::STATUS_FAILED);
+        assert_eq!(items[0].status, state_machine::STATUS_FAILED);
+        assert_eq!(items[0].error_code.as_deref(), Some("E_TARGET_MISSING"));
     }
 }
