@@ -11,7 +11,11 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Agent => agent::run_agent(&app)?,
-        Commands::Import { target, paths } => cli::handle_import(&app, target, paths)?,
+        Commands::Import {
+            target,
+            process,
+            paths,
+        } => cli::handle_import_command(&app, target, process, paths)?,
         Commands::Jobs { command } => cli::handle_jobs(&app, command)?,
         Commands::Targets { command } => cli::handle_targets(&app, command)?,
         Commands::Config { command } => cli::handle_config(&app, command)?,

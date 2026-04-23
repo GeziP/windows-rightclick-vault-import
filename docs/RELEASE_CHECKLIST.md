@@ -38,6 +38,7 @@ Set-Content "$sample\note.md" "release smoke test"
 .\target\release\kbintake.exe jobs list
 .\target\release\kbintake.exe agent
 .\target\release\kbintake.exe jobs list
+.\target\release\kbintake.exe import --process "$sample\note.md"
 ```
 
 Expected result:
@@ -46,6 +47,7 @@ Expected result:
 - `import` prints a batch ID, item count, and target.
 - `agent` reports at least one processed item.
 - `jobs list` shows the batch moving from queued/running to success.
+- `import --process` queues and processes work in one command.
 - The copied file exists under the configured target vault.
 
 ## Explorer Registration Validation

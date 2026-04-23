@@ -2,7 +2,7 @@ use std::fs;
 
 use kbintake::agent::scheduler::drain_queue;
 use kbintake::app::App;
-use kbintake::cli::{handle_import, handle_targets, TargetCommands};
+use kbintake::cli::{handle_import, handle_import_command, handle_targets, TargetCommands};
 use kbintake::queue::repository::Repository;
 use kbintake::queue::state_machine;
 use rusqlite::{params, Connection};
@@ -205,6 +205,71 @@ fn explicit_import_target_processes_into_selected_vault() {
         .root_path
         .join("archive-note.md")
         .exists());
+}
+
+#[test]
+fn import_process_drains_new_work_end_to_end() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let source = temp.path().join("process-note.md");
+    fs::write(&source, "process me").unwrap();
+
+    handle_import_command(&app, None, true, vec![source]).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(10).unwrap().pop().unwrap();
+    let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+
+    assert_eq!(batch.status, state_machine::STATUS_SUCCESS);
+    assert_eq!(items[0].status, state_machine::STATUS_SUCCESS);
+    assert!(app
+        .config
+        .targets
+        .iter()
+        .find(|target| target.target_id == "default")
+        .unwrap()
+        .root_path
+        .join("process-note.md")
+        .exists());
+}
+
+#[test]
+fn import_without_process_leaves_work_queued() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let source = temp.path().join("queued-note.md");
+    fs::write(&source, "queue me").unwrap();
+
+    handle_import_command(&app, None, false, vec![source]).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(10).unwrap().pop().unwrap();
+    let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+
+    assert_eq!(batch.status, state_machine::STATUS_QUEUED);
+    assert_eq!(items[0].status, state_machine::STATUS_QUEUED);
+}
+
+#[test]
+fn import_process_failure_before_enqueue_does_not_drain_existing_queue() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let existing = temp.path().join("existing.md");
+    let missing = temp.path().join("missing.md");
+    fs::write(&existing, "still queued").unwrap();
+    handle_import(&app, None, vec![existing]).unwrap();
+
+    let err = handle_import_command(&app, None, true, vec![missing]).unwrap_err();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(10).unwrap().pop().unwrap();
+    let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+    assert!(err.to_string().contains("failed to scan path"));
+    assert_eq!(batch.status, state_machine::STATUS_QUEUED);
+    assert_eq!(items[0].status, state_machine::STATUS_QUEUED);
 }
 
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {

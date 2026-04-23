@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use tracing::info;
 
+use crate::agent::scheduler;
 use crate::app::App;
 use crate::config::{self, AppConfig};
 use crate::domain::{BatchJob, DomainEvent, ItemJob};
@@ -24,6 +25,8 @@ pub enum Commands {
     Import {
         #[arg(long)]
         target: Option<String>,
+        #[arg(long)]
+        process: bool,
         paths: Vec<PathBuf>,
     },
     Jobs {
@@ -66,7 +69,31 @@ pub enum TargetCommands {
     SetDefault { target: String },
 }
 
-pub fn handle_import(app: &App, target_id: Option<String>, paths: Vec<PathBuf>) -> Result<()> {
+#[derive(Debug, Clone)]
+pub struct ImportOutcome {
+    pub batch_id: String,
+    pub item_count: usize,
+    pub target_name: String,
+}
+
+pub fn handle_import_command(
+    app: &App,
+    target_id: Option<String>,
+    process: bool,
+    paths: Vec<PathBuf>,
+) -> Result<()> {
+    handle_import(app, target_id, paths)?;
+    if process {
+        scheduler::drain_queue(app)?;
+    }
+    Ok(())
+}
+
+pub fn handle_import(
+    app: &App,
+    target_id: Option<String>,
+    paths: Vec<PathBuf>,
+) -> Result<ImportOutcome> {
     if paths.is_empty() {
         anyhow::bail!("no input paths provided");
     }
@@ -121,7 +148,11 @@ pub fn handle_import(app: &App, target_id: Option<String>, paths: Vec<PathBuf>) 
     println!("Queued batch: {}", batch.batch_id);
     println!("Items queued: {}", count);
     println!("Target: {}", target.name);
-    Ok(())
+    Ok(ImportOutcome {
+        batch_id: batch.batch_id,
+        item_count: count,
+        target_name: target.name,
+    })
 }
 
 pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
@@ -371,7 +402,7 @@ mod tests {
         .unwrap();
         let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
 
-        handle_import(&reloaded, None, vec![source]).unwrap();
+        let outcome = handle_import(&reloaded, None, vec![source]).unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -387,6 +418,9 @@ mod tests {
         assert_eq!(items[0].target_id, "archive");
         assert_eq!(batch_events[0].event_type, "batch.queued");
         assert_eq!(item_events[0].event_type, "item.queued");
+        assert_eq!(outcome.batch_id, batch.batch_id);
+        assert_eq!(outcome.item_count, 1);
+        assert_eq!(outcome.target_name, "archive");
     }
 
     #[test]
