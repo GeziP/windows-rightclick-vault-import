@@ -61,7 +61,7 @@ impl AppConfig {
     pub fn target_by_id(&self, target_id: &str) -> Result<Target> {
         self.targets
             .iter()
-            .find(|target| target.target_id == target_id)
+            .find(|target| target.target_id == target_id || target.name == target_id)
             .cloned()
             .with_context(|| format!("target not configured: {target_id}"))
     }
@@ -82,14 +82,47 @@ impl AppConfig {
     }
 
     pub fn set_default_target_by_id(&mut self, target_id: &str) -> Result<Target> {
-        let index = self
-            .targets
-            .iter()
-            .position(|target| target.target_id == target_id || target.name == target_id)
-            .with_context(|| format!("target not configured: {target_id}"))?;
+        let index = self.target_index(target_id)?;
         let target = self.targets.remove(index);
         self.targets.insert(0, target.clone());
         Ok(target)
+    }
+
+    pub fn rename_target(
+        &mut self,
+        target_id: impl AsRef<str>,
+        new_name: impl Into<String>,
+    ) -> Result<Target> {
+        let target_id = target_id.as_ref();
+        let new_name = validate_target_name(new_name.into())?;
+        if self.targets.iter().any(|target| {
+            (target.target_id == new_name || target.name == new_name)
+                && target.target_id != target_id
+                && target.name != target_id
+        }) {
+            bail!("target already configured: {new_name}");
+        }
+
+        let index = self.target_index(target_id)?;
+        self.targets[index].target_id = new_name.clone();
+        self.targets[index].name = new_name;
+        Ok(self.targets[index].clone())
+    }
+
+    pub fn remove_target(&mut self, target_id: &str) -> Result<Target> {
+        if self.targets.len() <= 1 {
+            bail!("cannot remove the last configured target");
+        }
+
+        let index = self.target_index(target_id)?;
+        Ok(self.targets.remove(index))
+    }
+
+    fn target_index(&self, target_id: &str) -> Result<usize> {
+        self.targets
+            .iter()
+            .position(|target| target.target_id == target_id || target.name == target_id)
+            .with_context(|| format!("target not configured: {target_id}"))
     }
 
     pub fn config_path(&self) -> PathBuf {
@@ -206,6 +239,87 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("target not configured"));
+    }
+
+    #[test]
+    fn rename_target_updates_id_and_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+
+        let target = config.rename_target("archive", "notes").unwrap();
+
+        assert_eq!(target.target_id, "notes");
+        assert_eq!(target.name, "notes");
+        assert!(config.target_by_id("notes").is_ok());
+        assert!(config.target_by_id("archive").is_err());
+    }
+
+    #[test]
+    fn rename_target_rejects_duplicate_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+
+        let err = config.rename_target("archive", "default").unwrap_err();
+
+        assert!(err.to_string().contains("target already configured"));
+    }
+
+    #[test]
+    fn rename_target_rejects_invalid_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+
+        let err = config.rename_target("default", "bad name").unwrap_err();
+
+        assert!(err.to_string().contains("may only contain"));
+    }
+
+    #[test]
+    fn remove_non_default_target_preserves_default() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+
+        let removed = config.remove_target("archive").unwrap();
+
+        assert_eq!(removed.target_id, "archive");
+        assert_eq!(config.targets.len(), 1);
+        assert_eq!(config.targets[0].target_id, "default");
+    }
+
+    #[test]
+    fn remove_default_target_promotes_next_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+
+        let removed = config.remove_target("default").unwrap();
+
+        assert_eq!(removed.target_id, "default");
+        assert_eq!(config.targets.len(), 1);
+        assert_eq!(config.targets[0].target_id, "archive");
+    }
+
+    #[test]
+    fn remove_target_rejects_last_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+
+        let err = config.remove_target("default").unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("cannot remove the last configured target"));
     }
 
     #[test]

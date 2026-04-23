@@ -12,7 +12,7 @@ The current release is a local MVP: it scans files, queues import jobs in SQLite
 - Process queued work with `agent` or immediately with `import --process`.
 - Validate source files, enforce max size, compute SHA-256 hashes, and deduplicate by target/hash.
 - Copy files into local vault targets without overwriting existing files.
-- Manage multiple vault targets with `targets add/list/show/set-default`.
+- Manage multiple vault targets with `targets add/list/show/rename/remove/set-default`.
 - Import into a specific target with `import --target <target>`.
 - Inspect batches and item details with `jobs list` and `jobs show`.
 - Retry failed items with `jobs retry <batch-id>`.
@@ -38,7 +38,6 @@ In development / planned:
 - Registry script generation or installer flow so users do not hand-edit executable paths.
 - Long-running background agent or Windows service mode.
 - Schema migration versioning.
-- Target remove/rename commands.
 - More polished job output formats such as JSON or table views.
 
 ## Install From Source
@@ -86,6 +85,13 @@ cargo run -- targets list
 cargo run -- import --target archive --process C:\path\to\folder
 ```
 
+Rename or remove a target:
+
+```powershell
+cargo run -- targets rename archive notes
+cargo run -- targets remove notes
+```
+
 Retry failed work:
 
 ```powershell
@@ -104,6 +110,8 @@ kbintake config-show
 kbintake targets list
 kbintake targets show <target>
 kbintake targets add <name> <path>
+kbintake targets rename <target> <new-name>
+kbintake targets remove <target>
 kbintake targets set-default <target>
 kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only]
 kbintake explorer uninstall

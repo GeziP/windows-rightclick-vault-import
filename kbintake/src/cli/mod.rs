@@ -68,10 +68,37 @@ pub enum ConfigCommands {
 
 #[derive(Subcommand, Debug)]
 pub enum TargetCommands {
+    #[command(about = "List configured vault targets")]
     List,
-    Show { target: String },
-    Add { name: String, path: PathBuf },
-    SetDefault { target: String },
+    #[command(about = "Show one configured vault target")]
+    Show {
+        #[arg(help = "Target ID or name")]
+        target: String,
+    },
+    #[command(about = "Add a vault target")]
+    Add {
+        #[arg(help = "Target name and ID")]
+        name: String,
+        #[arg(help = "Vault directory path")]
+        path: PathBuf,
+    },
+    #[command(about = "Rename a vault target")]
+    Rename {
+        #[arg(help = "Current target ID or name")]
+        target: String,
+        #[arg(help = "New target name and ID")]
+        new_name: String,
+    },
+    #[command(about = "Remove a vault target")]
+    Remove {
+        #[arg(help = "Target ID or name")]
+        target: String,
+    },
+    #[command(about = "Make a target the default import target")]
+    SetDefault {
+        #[arg(help = "Target ID or name")]
+        target: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -335,6 +362,24 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             println!("Path: {}", target.root_path.display());
             Ok(())
         }
+        TargetCommands::Rename { target, new_name } => {
+            let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
+            let target = config.rename_target(&target, new_name)?;
+            config.save()?;
+            println!("Renamed target: {}", target.target_id);
+            println!("Path: {}", target.root_path.display());
+            Ok(())
+        }
+        TargetCommands::Remove { target } => {
+            let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
+            let removed = config.remove_target(&target)?;
+            config.save()?;
+            println!("Removed target: {}", removed.target_id);
+            if let Ok(default_target) = config.default_target() {
+                println!("Default target: {}", default_target.target_id);
+            }
+            Ok(())
+        }
         TargetCommands::SetDefault { target } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.set_default_target_by_id(&target)?;
@@ -526,6 +571,62 @@ mod tests {
         assert_eq!(reloaded.config.targets[0].target_id, "default");
         assert_eq!(reloaded.config.targets[1].target_id, "archive");
         assert_eq!(reloaded.config.targets[1].root_path, target_root);
+    }
+
+    #[test]
+    fn targets_rename_persists_updated_target_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: temp.path().join("archive"),
+            },
+        )
+        .unwrap();
+        let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+
+        handle_targets(
+            &app,
+            TargetCommands::Rename {
+                target: "archive".to_string(),
+                new_name: "notes".to_string(),
+            },
+        )
+        .unwrap();
+
+        let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        assert!(reloaded.config.target_by_id("archive").is_err());
+        assert_eq!(reloaded.config.target_by_id("notes").unwrap().name, "notes");
+    }
+
+    #[test]
+    fn targets_remove_persists_target_deletion() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: temp.path().join("archive"),
+            },
+        )
+        .unwrap();
+        let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+
+        handle_targets(
+            &app,
+            TargetCommands::Remove {
+                target: "archive".to_string(),
+            },
+        )
+        .unwrap();
+
+        let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        assert_eq!(reloaded.config.targets.len(), 1);
+        assert_eq!(reloaded.config.targets[0].target_id, "default");
+        assert!(reloaded.config.target_by_id("archive").is_err());
     }
 
     #[test]
