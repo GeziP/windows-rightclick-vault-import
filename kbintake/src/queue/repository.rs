@@ -2,7 +2,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
-use crate::domain::{BatchJob, ItemJob, ManifestRecord};
+use crate::domain::{BatchJob, DomainEvent, ItemJob, ManifestRecord};
 use crate::queue::state_machine;
 
 pub struct Repository<'a> {
@@ -237,6 +237,37 @@ impl<'a> Repository<'a> {
             .optional()
             .map_err(Into::into)
     }
+
+    pub fn insert_event(&self, event: &DomainEvent) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO events (
+                event_id, entity_type, entity_id, event_type, payload_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                &event.event_id,
+                &event.entity_type,
+                &event.entity_id,
+                &event.event_type,
+                event.payload_json.to_string(),
+                event.created_at.to_rfc3339()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_events_for_entity(
+        &self,
+        entity_type: &str,
+        entity_id: &str,
+    ) -> Result<Vec<DomainEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT event_id, entity_type, entity_id, event_type, payload_json, created_at
+             FROM events WHERE entity_type = ?1 AND entity_id = ?2 ORDER BY created_at ASC",
+        )?;
+        let rows = stmt.query_map(params![entity_type, entity_id], row_to_event)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
 }
 
 fn ensure_updated(rows: usize, entity: &str, id: &str) -> Result<()> {
@@ -315,6 +346,22 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ItemJob> {
     })
 }
 
+fn row_to_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<DomainEvent> {
+    let payload_raw: String = row.get(4)?;
+    let payload_json = serde_json::from_str(&payload_raw).map_err(|err| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(err))
+    })?;
+
+    Ok(DomainEvent {
+        event_id: row.get(0)?,
+        entity_type: row.get(1)?,
+        entity_id: row.get(2)?,
+        event_type: row.get(3)?,
+        payload_json,
+        created_at: parse_utc(row.get(5)?)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -323,7 +370,7 @@ mod tests {
 
     use super::Repository;
     use crate::db;
-    use crate::domain::{BatchJob, ItemJob, ManifestRecord};
+    use crate::domain::{BatchJob, DomainEvent, ItemJob, ManifestRecord};
     use crate::queue::state_machine;
 
     fn repo_with_conn() -> (Connection, BatchJob, ItemJob) {
@@ -419,5 +466,26 @@ mod tests {
             repo.find_manifest_by_hash("default", "abc123").unwrap(),
             Some(record_id)
         );
+    }
+
+    #[test]
+    fn inserts_and_lists_events_for_entity() {
+        let (conn, _batch, item) = repo_with_conn();
+        let repo = Repository::new(&conn);
+        let event = DomainEvent::new(
+            "item",
+            item.item_id.clone(),
+            "item.failed",
+            serde_json::json!({
+                "error_code": "E_TEST"
+            }),
+        );
+
+        repo.insert_event(&event).unwrap();
+
+        let events = repo.list_events_for_entity("item", &item.item_id).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "item.failed");
+        assert_eq!(events[0].payload_json["error_code"], "E_TEST");
     }
 }

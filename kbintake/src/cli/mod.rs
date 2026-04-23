@@ -6,7 +6,7 @@ use tracing::info;
 
 use crate::app::App;
 use crate::config::{self, AppConfig};
-use crate::domain::{BatchJob, ItemJob};
+use crate::domain::{BatchJob, DomainEvent, ItemJob};
 use crate::processor::scanner;
 use crate::queue::repository::Repository;
 
@@ -89,13 +89,30 @@ pub fn handle_import(app: &App, target_id: Option<String>, paths: Vec<PathBuf>) 
     let repo = Repository::new(&conn);
     let batch = BatchJob::new("cli", &target.target_id, files.len() as i64);
     repo.insert_batch(&batch)?;
+    repo.insert_event(&DomainEvent::new(
+        "batch",
+        batch.batch_id.clone(),
+        "batch.queued",
+        serde_json::json!({
+            "source": batch.source,
+            "target_id": batch.target_id,
+            "source_count": batch.source_count
+        }),
+    ))?;
 
     let mut count = 0usize;
     for file in files {
-        repo.insert_item(&ItemJob::new(
-            batch.batch_id.clone(),
-            target.target_id.clone(),
-            file,
+        let item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
+        repo.insert_item(&item)?;
+        repo.insert_event(&DomainEvent::new(
+            "item",
+            item.item_id.clone(),
+            "item.queued",
+            serde_json::json!({
+                "batch_id": item.batch_id,
+                "target_id": item.target_id,
+                "source_path": item.source_path
+            }),
         ))?;
         count += 1;
     }
@@ -129,9 +146,27 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
             for item in items {
                 println!("{}", format_item_line(item));
             }
+            print_events(&repo, "batch", &batch.batch_id)?;
+            for item in repo.list_items_by_batch(&batch_id)? {
+                print_events(&repo, "item", &item.item_id)?;
+            }
         }
     }
     Ok(())
+}
+
+fn print_events(repo: &Repository<'_>, entity_type: &str, entity_id: &str) -> Result<()> {
+    for event in repo.list_events_for_entity(entity_type, entity_id)? {
+        println!("{}", format_event_line(event));
+    }
+    Ok(())
+}
+
+fn format_event_line(event: DomainEvent) -> String {
+    format!(
+        "event {} {} {}",
+        event.created_at, event.event_type, event.payload_json
+    )
 }
 
 fn format_item_line(item: ItemJob) -> String {
@@ -241,13 +276,13 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        format_item_line, handle_config, handle_import, handle_targets, ConfigCommands,
-        TargetCommands,
+        format_event_line, format_item_line, handle_config, handle_import, handle_targets,
+        ConfigCommands, TargetCommands,
     };
     use crate::app::App;
     use crate::config::{AppConfig, ImportConfig};
     use crate::db;
-    use crate::domain::{ItemJob, Target};
+    use crate::domain::{DomainEvent, ItemJob, Target};
     use crate::queue::repository::Repository;
 
     fn test_app(temp: &tempfile::TempDir) -> App {
@@ -342,8 +377,16 @@ mod tests {
         let repo = Repository::new(&conn);
         let batch = repo.list_batches(1).unwrap().pop().unwrap();
         let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+        let batch_events = repo
+            .list_events_for_entity("batch", &batch.batch_id)
+            .unwrap();
+        let item_events = repo
+            .list_events_for_entity("item", &items[0].item_id)
+            .unwrap();
         assert_eq!(batch.target_id, "archive");
         assert_eq!(items[0].target_id, "archive");
+        assert_eq!(batch_events[0].event_type, "batch.queued");
+        assert_eq!(item_events[0].event_type, "item.queued");
     }
 
     #[test]
@@ -450,5 +493,20 @@ mod tests {
 
         assert!(line.contains("target=archive"));
         assert!(line.contains("error=E_TEST: test failure"));
+    }
+
+    #[test]
+    fn jobs_event_line_includes_type_and_payload() {
+        let event = DomainEvent::new(
+            "item",
+            "item-1",
+            "item.failed",
+            serde_json::json!({ "error_code": "E_TEST" }),
+        );
+
+        let line = format_event_line(event);
+
+        assert!(line.contains("item.failed"));
+        assert!(line.contains("\"error_code\":\"E_TEST\""));
     }
 }

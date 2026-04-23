@@ -6,6 +6,7 @@ pub mod manifest;
 pub mod target;
 
 pub use batch::BatchJob;
+pub use event::DomainEvent;
 pub use item::ItemJob;
 pub use manifest::ManifestRecord;
 pub use target::Target;

@@ -5,7 +5,7 @@ use tracing::{error, info, warn};
 
 use crate::adapter::local_folder::LocalFolderAdapter;
 use crate::app::App;
-use crate::domain::{ItemJob, ManifestRecord};
+use crate::domain::{DomainEvent, ItemJob, ManifestRecord};
 use crate::processor::{deduper, hasher, validator};
 use crate::queue::repository::Repository;
 
@@ -17,6 +17,16 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         Ok(target) => target,
         Err(err) => {
             repo.mark_item_failed(&item.item_id, "E_TARGET_MISSING", &err.to_string())?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.failed",
+                serde_json::json!({
+                    "status": "failed",
+                    "error_code": "E_TARGET_MISSING",
+                    "error_message": err.to_string()
+                }),
+            )?;
             error!(item_id = %item.item_id, target_id = %item.target_id, error = %err, "target lookup failed");
             return Ok(());
         }
@@ -27,6 +37,16 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         Ok(size) => size,
         Err(err) => {
             repo.mark_item_failed(&item.item_id, "E_SOURCE_INVALID", &err.to_string())?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.failed",
+                serde_json::json!({
+                    "status": "failed",
+                    "error_code": "E_SOURCE_INVALID",
+                    "error_message": err.to_string()
+                }),
+            )?;
             error!(item_id = %item.item_id, error = %err, "validation failed");
             return Ok(());
         }
@@ -37,6 +57,16 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         Ok(hash) => hash,
         Err(err) => {
             repo.mark_item_failed(&item.item_id, "E_HASH_FAILED", &err.to_string())?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.failed",
+                serde_json::json!({
+                    "status": "failed",
+                    "error_code": "E_HASH_FAILED",
+                    "error_message": err.to_string()
+                }),
+            )?;
             error!(item_id = %item.item_id, error = %err, "hash failed");
             return Ok(());
         }
@@ -46,6 +76,15 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
     if let Some(existing_record_id) = deduper::find_duplicate_record(&repo, &item.target_id, &hash)?
     {
         repo.mark_item_duplicate(&item.item_id, &existing_record_id)?;
+        record_item_event(
+            &repo,
+            &item,
+            "item.duplicate",
+            serde_json::json!({
+                "status": "duplicate",
+                "duplicate_of": existing_record_id
+            }),
+        )?;
         warn!(item_id = %item.item_id, duplicate_of = %existing_record_id, "duplicate skipped");
         return Ok(());
     }
@@ -56,6 +95,16 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         Ok(dest) => dest,
         Err(err) => {
             repo.mark_item_failed(&item.item_id, "E_COPY_FAILED", &err.to_string())?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.failed",
+                serde_json::json!({
+                    "status": "failed",
+                    "error_code": "E_COPY_FAILED",
+                    "error_message": err.to_string()
+                }),
+            )?;
             error!(item_id = %item.item_id, error = %err, "copy failed");
             return Ok(());
         }
@@ -76,6 +125,15 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
             deduper::find_duplicate_record(&repo, &item.target_id, &record.sha256)?
         {
             repo.mark_item_duplicate(&item.item_id, &existing_record_id)?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.duplicate",
+                serde_json::json!({
+                    "status": "duplicate",
+                    "duplicate_of": existing_record_id
+                }),
+            )?;
             warn!(
                 item_id = %item.item_id,
                 duplicate_of = %existing_record_id,
@@ -86,11 +144,46 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         }
 
         repo.mark_item_failed(&item.item_id, "E_MANIFEST_FAILED", &err.to_string())?;
+        record_item_event(
+            &repo,
+            &item,
+            "item.failed",
+            serde_json::json!({
+                "status": "failed",
+                "error_code": "E_MANIFEST_FAILED",
+                "error_message": err.to_string()
+            }),
+        )?;
         error!(item_id = %item.item_id, error = %err, "manifest insert failed");
         return Ok(());
     }
     repo.mark_item_success(&item.item_id, &record.stored_path)?;
+    record_item_event(
+        &repo,
+        &item,
+        "item.success",
+        serde_json::json!({
+            "status": "success",
+            "stored_path": record.stored_path,
+            "sha256": record.sha256,
+            "source_size": record.source_size
+        }),
+    )?;
 
     info!(item_id = %item.item_id, stored_path = %record.stored_path, "item imported");
     Ok(())
+}
+
+fn record_item_event(
+    repo: &Repository<'_>,
+    item: &ItemJob,
+    event_type: &str,
+    payload_json: serde_json::Value,
+) -> Result<()> {
+    repo.insert_event(&DomainEvent::new(
+        "item",
+        item.item_id.clone(),
+        event_type,
+        payload_json,
+    ))
 }

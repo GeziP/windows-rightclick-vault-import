@@ -124,6 +124,14 @@ fn agent_processes_queued_import_successfully() {
     assert!(items[0].stored_path.is_some());
     assert!(app.config.targets[0].root_path.join("note.md").exists());
     assert_eq!(manifest_count_for_item(&conn, &items[0].item_id), 1);
+    assert_eq!(
+        event_types_for_entity(&conn, "batch", &batch.batch_id),
+        vec!["batch.queued"]
+    );
+    assert_eq!(
+        event_types_for_entity(&conn, "item", &items[0].item_id),
+        vec!["item.queued", "item.success"]
+    );
 }
 
 #[test]
@@ -151,6 +159,10 @@ fn agent_marks_duplicate_without_second_copy() {
     assert_eq!(items[1].status, state_machine::STATUS_DUPLICATE);
     assert!(items[1].duplicate_of.is_some());
     assert_eq!(copied_count, 1);
+    assert_eq!(
+        event_types_for_entity(&conn, "item", &items[1].item_id),
+        vec!["item.queued", "item.duplicate"]
+    );
 }
 
 #[test]
@@ -211,4 +223,18 @@ fn manifest_count_for_item(conn: &Connection, item_id: &str) -> i64 {
         |row| row.get(0),
     )
     .unwrap()
+}
+
+fn event_types_for_entity(conn: &Connection, entity_type: &str, entity_id: &str) -> Vec<String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT event_type FROM events
+             WHERE entity_type = ?1 AND entity_id = ?2
+             ORDER BY created_at ASC",
+        )
+        .unwrap();
+    stmt.query_map(params![entity_type, entity_id], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
 }
