@@ -485,6 +485,80 @@ fn jobs_undo_force_deletes_modified_file() {
 }
 
 #[test]
+fn cli_jobs_list_json_supports_status_filter_and_limit() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let source = temp.path().join("failed.md");
+    fs::write(&source, "will fail").unwrap();
+    handle_import(&app, None, vec![source.clone()]).unwrap();
+    fs::remove_file(&source).unwrap();
+    drain_queue(&app).unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args([
+            "jobs", "list", "--status", "failed", "--limit", "1", "--json",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let rows: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let rows = rows.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["status"], state_machine::STATUS_FAILED);
+}
+
+#[test]
+fn cli_jobs_show_json_returns_batch_and_items() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("show.md");
+    fs::write(&source, "show me").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch_id = repo.list_batches(1).unwrap().pop().unwrap().batch_id;
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "show", &batch_id, "--json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body["batch_id"], batch_id);
+    assert!(body["items"].as_array().is_some());
+    assert_eq!(body["items"].as_array().unwrap().len(), 1);
+    assert_eq!(body["items"][0]["status"], state_machine::STATUS_SUCCESS);
+}
+
+#[test]
+fn cli_jobs_list_rejects_unknown_status_filter() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "list", "--status", "bad-status"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::INVALID_ARGUMENTS)
+    );
+}
+
+#[test]
 fn cli_returns_target_not_found_exit_code_for_invalid_import_target() {
     let temp = tempfile::tempdir().unwrap();
     let source = temp.path().join("note.md");

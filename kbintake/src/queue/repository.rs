@@ -94,6 +94,21 @@ impl<'a> Repository<'a> {
             .map_err(Into::into)
     }
 
+    pub fn list_batches_filtered(&self, limit: i64, status: Option<&str>) -> Result<Vec<BatchJob>> {
+        if let Some(status) = status {
+            let mut stmt = self.conn.prepare(
+                "SELECT batch_id, source, target_id, status, source_count, created_at, updated_at
+                 FROM batches WHERE status = ?1 ORDER BY created_at DESC LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![status, limit], row_to_batch)?;
+            return rows
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(Into::into);
+        }
+
+        self.list_batches(limit)
+    }
+
     pub fn get_batch(&self, batch_id: &str) -> Result<BatchJob> {
         self.conn
             .query_row(
@@ -642,6 +657,31 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "item.failed");
         assert_eq!(events[0].payload_json["error_code"], "E_TEST");
+    }
+
+    #[test]
+    fn list_batches_filtered_returns_matching_status_only() {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init_schema(&conn).unwrap();
+        let repo = Repository::new(&conn);
+        let queued_batch = BatchJob::new("test", "default", 1);
+        let failed_batch = BatchJob::new("test", "default", 2);
+        repo.insert_batch(&queued_batch).unwrap();
+        repo.insert_batch(&failed_batch).unwrap();
+        repo.update_batch_status(&failed_batch.batch_id, state_machine::STATUS_FAILED)
+            .unwrap();
+
+        let only_failed = repo
+            .list_batches_filtered(20, Some(state_machine::STATUS_FAILED))
+            .unwrap();
+        let only_queued = repo
+            .list_batches_filtered(20, Some(state_machine::STATUS_QUEUED))
+            .unwrap();
+
+        assert_eq!(only_failed.len(), 1);
+        assert_eq!(only_failed[0].batch_id, failed_batch.batch_id);
+        assert_eq!(only_queued.len(), 1);
+        assert_eq!(only_queued[0].batch_id, queued_batch.batch_id);
     }
 
     #[test]

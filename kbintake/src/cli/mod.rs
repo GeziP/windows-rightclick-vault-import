@@ -61,9 +61,20 @@ pub enum Commands {
 
 #[derive(Subcommand, Debug)]
 pub enum JobCommands {
-    List,
+    List {
+        #[arg(long, help = "Filter by batch status")]
+        status: Option<String>,
+        #[arg(long, default_value_t = 20, help = "Maximum batches to show")]
+        limit: usize,
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
+        #[arg(long, help = "Output as table (default unless --json)")]
+        table: bool,
+    },
     Show {
         batch_id: String,
+        #[arg(long, help = "Output as JSON")]
+        json: bool,
     },
     Retry {
         batch_id: String,
@@ -259,18 +270,69 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
     let repo = Repository::new(&conn);
 
     match command {
-        JobCommands::List => {
-            for row in repo.list_batches(20)? {
+        JobCommands::List {
+            status,
+            limit,
+            json,
+            table: _table,
+        } => {
+            let status = parse_batch_status_filter(status)?;
+            let rows = repo.list_batches_filtered(limit as i64, status.as_deref())?;
+            if json {
+                let out = rows
+                    .into_iter()
+                    .map(|row| JobListRow {
+                        batch_id: row.batch_id,
+                        status: row.status,
+                        source_count: row.source_count,
+                        target_id: row.target_id,
+                        created_at: row.created_at.to_rfc3339(),
+                        updated_at: row.updated_at.to_rfc3339(),
+                    })
+                    .collect::<Vec<_>>();
+                println!("{}", serde_json::to_string_pretty(&out)?);
+                return Ok(exit_codes::SUCCESS);
+            }
+
+            println!(
+                "{:<36}  {:<18}  {:>5}  {:<12}  created_at",
+                "batch_id", "status", "items", "target"
+            );
+            for row in rows {
                 println!(
-                    "{}  {}  items={}  target={}  created={}",
+                    "{:<36}  {:<18}  {:>5}  {:<12}  {}",
                     row.batch_id, row.status, row.source_count, row.target_id, row.created_at
                 );
             }
             Ok(exit_codes::SUCCESS)
         }
-        JobCommands::Show { batch_id } => {
+        JobCommands::Show { batch_id, json } => {
             let batch = repo.get_batch(&batch_id)?;
             let items = repo.list_items_by_batch(&batch_id)?;
+            if json {
+                let out = JobShowRow {
+                    batch_id: batch.batch_id,
+                    status: batch.status,
+                    source: batch.source,
+                    source_count: batch.source_count,
+                    created_at: batch.created_at.to_rfc3339(),
+                    updated_at: batch.updated_at.to_rfc3339(),
+                    items: items
+                        .into_iter()
+                        .map(|item| JobShowItemRow {
+                            item_id: item.item_id,
+                            status: item.status,
+                            target_id: item.target_id,
+                            source_path: item.source_path,
+                            stored_path: item.stored_path,
+                            error_code: item.error_code,
+                            error_message: item.error_message,
+                        })
+                        .collect(),
+                };
+                println!("{}", serde_json::to_string_pretty(&out)?);
+                return Ok(exit_codes::SUCCESS);
+            }
             println!("Batch: {}", batch.batch_id);
             println!("Status: {}", batch.status);
             println!("Items: {}", items.len());
@@ -446,6 +508,59 @@ fn format_item_line(item: ItemJob) -> String {
             _ => String::new(),
         }
     )
+}
+
+#[derive(Debug, Serialize)]
+struct JobListRow {
+    batch_id: String,
+    status: String,
+    source_count: i64,
+    target_id: String,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct JobShowRow {
+    batch_id: String,
+    status: String,
+    source: String,
+    source_count: i64,
+    created_at: String,
+    updated_at: String,
+    items: Vec<JobShowItemRow>,
+}
+
+#[derive(Debug, Serialize)]
+struct JobShowItemRow {
+    item_id: String,
+    status: String,
+    target_id: String,
+    source_path: String,
+    stored_path: Option<String>,
+    error_code: Option<String>,
+    error_message: Option<String>,
+}
+
+fn parse_batch_status_filter(status: Option<String>) -> Result<Option<String>> {
+    let Some(status) = status else {
+        return Ok(None);
+    };
+    let status = status.trim().to_ascii_lowercase();
+    let valid = [
+        crate::queue::state_machine::STATUS_QUEUED,
+        crate::queue::state_machine::STATUS_RUNNING,
+        crate::queue::state_machine::STATUS_SUCCESS,
+        crate::queue::state_machine::STATUS_FAILED,
+        crate::queue::state_machine::STATUS_DUPLICATE,
+        crate::queue::state_machine::STATUS_UNDONE,
+        crate::queue::state_machine::STATUS_PARTIALLY_UNDONE,
+    ];
+    if valid.contains(&status.as_str()) {
+        return Ok(Some(status));
+    }
+
+    anyhow::bail!("unsupported status filter: {status}");
 }
 
 pub fn handle_doctor(app: &App) -> Result<()> {

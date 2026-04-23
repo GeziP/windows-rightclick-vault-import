@@ -97,7 +97,7 @@ enum TargetKind {
 
 fn command_kind(command: &JobCommands) -> JobKind {
     match command {
-        JobCommands::List => JobKind::List,
+        JobCommands::List { .. } => JobKind::List,
         JobCommands::Show { .. } => JobKind::Show,
         JobCommands::Retry { .. } => JobKind::Retry,
         JobCommands::Undo { .. } => JobKind::Undo,
@@ -155,6 +155,7 @@ fn classify_error(kind: CommandKind, err: &Error) -> i32 {
     if message.contains("no input paths provided")
         || message.contains("no importable files found")
         || message.contains("failed to scan path")
+        || message.contains("unsupported status filter")
         || message.contains("target already configured")
         || message.contains("target name")
         || message.contains("not a directory")

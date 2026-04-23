@@ -16,6 +16,7 @@ The current release is a local MVP: it scans files, queues import jobs in SQLite
 - Manage multiple active and archived vault targets with `targets add/list/show/rename/remove/set-default`.
 - Import into a specific target with `import --target <target>`.
 - Inspect batches and item details with `jobs list` and `jobs show`.
+- Filter and script job inspection with `jobs list --status/--limit` plus `--json` output.
 - Retry failed items with `jobs retry <batch-id>`.
 - Safely undo imported batches with `jobs undo <batch-id>` and optional `--force` for modified files.
 - Inspect per-target import health with `vault stats` and `vault stats --json`.
@@ -129,8 +130,8 @@ kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only
 kbintake explorer uninstall
 kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
 kbintake agent
-kbintake jobs list
-kbintake jobs show <batch-id>
+kbintake jobs list [--status <status>] [--limit <n>] [--json] [--table]
+kbintake jobs show <batch-id> [--json]
 kbintake jobs retry <batch-id>
 kbintake jobs undo <batch-id> [--force]
 kbintake vault stats [--json]
