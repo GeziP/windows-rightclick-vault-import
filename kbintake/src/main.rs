@@ -29,7 +29,6 @@ fn main() -> ExitCode {
             let kind = CommandKind::Jobs(command_kind(&command));
             app::App::bootstrap()
                 .and_then(|app| cli::handle_jobs(&app, command))
-                .map(|()| exit_codes::SUCCESS)
                 .map_err(|err| (kind, err))
         }
         Commands::Targets { command } => {
@@ -83,6 +82,7 @@ enum JobKind {
     List,
     Show,
     Retry,
+    Undo,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -100,6 +100,7 @@ fn command_kind(command: &JobCommands) -> JobKind {
         JobCommands::List => JobKind::List,
         JobCommands::Show { .. } => JobKind::Show,
         JobCommands::Retry { .. } => JobKind::Retry,
+        JobCommands::Undo { .. } => JobKind::Undo,
     }
 }
 
@@ -126,7 +127,9 @@ fn classify_error(kind: CommandKind, err: &Error) -> i32 {
 
     if is_missing_row(err) {
         return match kind {
-            CommandKind::Jobs(JobKind::Show | JobKind::Retry) => exit_codes::INVALID_ARGUMENTS,
+            CommandKind::Jobs(JobKind::Show | JobKind::Retry | JobKind::Undo) => {
+                exit_codes::INVALID_ARGUMENTS
+            }
             CommandKind::Targets(
                 TargetKind::Show | TargetKind::Rename | TargetKind::Remove | TargetKind::SetDefault,
             ) => exit_codes::TARGET_NOT_FOUND,

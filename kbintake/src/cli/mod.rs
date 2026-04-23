@@ -62,8 +62,17 @@ pub enum Commands {
 #[derive(Subcommand, Debug)]
 pub enum JobCommands {
     List,
-    Show { batch_id: String },
-    Retry { batch_id: String },
+    Show {
+        batch_id: String,
+    },
+    Retry {
+        batch_id: String,
+    },
+    Undo {
+        batch_id: String,
+        #[arg(long, help = "Delete modified files during undo")]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -245,7 +254,7 @@ pub fn handle_import(
     })
 }
 
-pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
+pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
 
@@ -257,6 +266,7 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
                     row.batch_id, row.status, row.source_count, row.target_id, row.created_at
                 );
             }
+            Ok(exit_codes::SUCCESS)
         }
         JobCommands::Show { batch_id } => {
             let batch = repo.get_batch(&batch_id)?;
@@ -271,6 +281,7 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
             for item in repo.list_items_by_batch(&batch_id)? {
                 print_events(&repo, "item", &item.item_id)?;
             }
+            Ok(exit_codes::SUCCESS)
         }
         JobCommands::Retry { batch_id } => {
             let failed_items = repo
@@ -291,9 +302,114 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
                 ))?;
             }
             println!("Retried items: {retried}");
+            Ok(exit_codes::SUCCESS)
+        }
+        JobCommands::Undo { batch_id, force } => {
+            let _batch = repo.get_batch(&batch_id)?;
+            let items = repo.list_items_by_batch(&batch_id)?;
+            let mut deleted_count = 0usize;
+            let mut skipped_modified_count = 0usize;
+
+            for item in items {
+                if item.status != crate::queue::state_machine::STATUS_SUCCESS {
+                    continue;
+                }
+
+                let Some(stored_path) = item.stored_path.clone() else {
+                    let message =
+                        format!("File path missing for item '{}' during undo.", item.item_id);
+                    repo.mark_item_undo_skipped_modified(&item.item_id, &message)?;
+                    repo.insert_event(&DomainEvent::new(
+                        "item",
+                        item.item_id.clone(),
+                        "item.undo_skipped_modified",
+                        serde_json::json!({
+                            "status": crate::queue::state_machine::STATUS_UNDO_SKIPPED_MODIFIED,
+                            "reason": "stored_path_missing",
+                            "message": message
+                        }),
+                    ))?;
+                    skipped_modified_count += 1;
+                    continue;
+                };
+
+                let path = PathBuf::from(&stored_path);
+                if path.exists() {
+                    let current_hash = crate::processor::hasher::sha256_file(&path)?;
+                    let expected_hash = item.sha256.as_deref().unwrap_or_default();
+                    if current_hash != expected_hash {
+                        let warning = format!(
+                            "File '{}' skipped during undo - content has been modified since import.",
+                            stored_path
+                        );
+                        eprintln!("WARN: {warning}");
+                        if !force {
+                            repo.mark_item_undo_skipped_modified(&item.item_id, &warning)?;
+                            repo.insert_event(&DomainEvent::new(
+                                "item",
+                                item.item_id.clone(),
+                                "item.undo_skipped_modified",
+                                serde_json::json!({
+                                    "status": crate::queue::state_machine::STATUS_UNDO_SKIPPED_MODIFIED,
+                                    "stored_path": stored_path,
+                                    "force": false,
+                                    "message": warning
+                                }),
+                            ))?;
+                            skipped_modified_count += 1;
+                            continue;
+                        }
+                    }
+
+                    std::fs::remove_file(&path).with_context(|| {
+                        format!("failed to remove imported file {}", path.display())
+                    })?;
+                }
+
+                repo.delete_manifest_by_item(&item.item_id)?;
+                repo.mark_item_undone(&item.item_id)?;
+                repo.insert_event(&DomainEvent::new(
+                    "item",
+                    item.item_id.clone(),
+                    "item.undone",
+                    serde_json::json!({
+                        "status": crate::queue::state_machine::STATUS_UNDONE,
+                        "stored_path": stored_path,
+                        "force": force
+                    }),
+                ))?;
+                deleted_count += 1;
+            }
+
+            let batch_status = if skipped_modified_count > 0 {
+                crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
+            } else {
+                crate::queue::state_machine::STATUS_UNDONE
+            };
+            repo.update_batch_status(&batch_id, batch_status)?;
+            repo.insert_event(&DomainEvent::new(
+                "batch",
+                batch_id.clone(),
+                "batch.undo_completed",
+                serde_json::json!({
+                    "status": batch_status,
+                    "deleted": deleted_count,
+                    "skipped_modified": skipped_modified_count,
+                    "force": force
+                }),
+            ))?;
+
+            println!(
+                "Undo complete: {} deleted, {} skipped (modified).",
+                deleted_count, skipped_modified_count
+            );
+            if skipped_modified_count > 0 {
+                Ok(exit_codes::PARTIAL_SUCCESS)
+            } else {
+                Ok(exit_codes::SUCCESS)
+            }
         }
     }
-    Ok(())
 }
 
 fn print_events(repo: &Repository<'_>, entity_type: &str, entity_id: &str) -> Result<()> {

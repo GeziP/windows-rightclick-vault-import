@@ -17,6 +17,7 @@ The current release is a local MVP: it scans files, queues import jobs in SQLite
 - Import into a specific target with `import --target <target>`.
 - Inspect batches and item details with `jobs list` and `jobs show`.
 - Retry failed items with `jobs retry <batch-id>`.
+- Safely undo imported batches with `jobs undo <batch-id>` and optional `--force` for modified files.
 - Inspect per-target import health with `vault stats` and `vault stats --json`.
 - Record audit events for queued, success, duplicate, failed, and retry transitions.
 - Register Windows Explorer file and directory context-menu entries with reviewable `.reg` scripts.
@@ -131,6 +132,7 @@ kbintake agent
 kbintake jobs list
 kbintake jobs show <batch-id>
 kbintake jobs retry <batch-id>
+kbintake jobs undo <batch-id> [--force]
 kbintake vault stats [--json]
 ```
 

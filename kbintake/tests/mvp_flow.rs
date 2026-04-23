@@ -303,13 +303,16 @@ fn jobs_retry_requeues_failed_items_for_successful_agent_drain() {
     drop(conn);
 
     fs::write(&source, "now exists").unwrap();
-    handle_jobs(
-        &app,
-        JobCommands::Retry {
-            batch_id: batch.batch_id.clone(),
-        },
-    )
-    .unwrap();
+    assert_eq!(
+        handle_jobs(
+            &app,
+            JobCommands::Retry {
+                batch_id: batch.batch_id.clone(),
+            },
+        )
+        .unwrap(),
+        kbintake::exit_codes::SUCCESS
+    );
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -328,6 +331,157 @@ fn jobs_retry_requeues_failed_items_for_successful_agent_drain() {
             "item.success"
         ]
     );
+}
+
+#[test]
+fn jobs_undo_deletes_imported_files_and_marks_batch_undone() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("undo-note.md");
+    fs::write(&source, "undo me").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let stored_path = item.stored_path.clone().unwrap();
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(!std::path::Path::new(&stored_path).exists());
+
+    let app = App::bootstrap_in(app_data_dir).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.get_batch(&batch.batch_id).unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(batch.status, state_machine::STATUS_UNDONE);
+    assert_eq!(item.status, state_machine::STATUS_UNDONE);
+    assert_eq!(manifest_count_for_item(&conn, &item.item_id), 0);
+}
+
+#[test]
+fn jobs_undo_returns_partial_when_file_modified() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("undo-modified.md");
+    fs::write(&source, "original").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let stored_path = item.stored_path.clone().unwrap();
+    drop(conn);
+    fs::write(&stored_path, "changed").unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::PARTIAL_SUCCESS)
+    );
+    assert!(std::path::Path::new(&stored_path).exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("WARN: File"));
+
+    let app = App::bootstrap_in(app_data_dir).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.get_batch(&batch.batch_id).unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(batch.status, state_machine::STATUS_PARTIALLY_UNDONE);
+    assert_eq!(item.status, state_machine::STATUS_UNDO_SKIPPED_MODIFIED);
+    assert_eq!(manifest_count_for_item(&conn, &item.item_id), 1);
+}
+
+#[test]
+fn jobs_undo_force_deletes_modified_file() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("undo-force.md");
+    fs::write(&source, "original").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let stored_path = item.stored_path.clone().unwrap();
+    drop(conn);
+    fs::write(&stored_path, "changed").unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id, "--force"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(!std::path::Path::new(&stored_path).exists());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("WARN: File"));
+
+    let app = App::bootstrap_in(app_data_dir).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.get_batch(&batch.batch_id).unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(batch.status, state_machine::STATUS_UNDONE);
+    assert_eq!(item.status, state_machine::STATUS_UNDONE);
+    assert_eq!(manifest_count_for_item(&conn, &item.item_id), 0);
 }
 
 #[test]

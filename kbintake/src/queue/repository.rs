@@ -258,6 +258,38 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
+    pub fn mark_item_undone(&self, item_id: &str) -> Result<()> {
+        let rows = self.conn.execute(
+            "UPDATE items
+             SET status = ?1, stage = NULL, error_code = NULL, error_message = NULL, updated_at = ?2
+             WHERE item_id = ?3",
+            params![
+                state_machine::STATUS_UNDONE,
+                Utc::now().to_rfc3339(),
+                item_id
+            ],
+        )?;
+        ensure_updated(rows, "item", item_id)?;
+        Ok(())
+    }
+
+    pub fn mark_item_undo_skipped_modified(&self, item_id: &str, message: &str) -> Result<()> {
+        let rows = self.conn.execute(
+            "UPDATE items
+             SET status = ?1, stage = NULL, error_code = ?2, error_message = ?3, updated_at = ?4
+             WHERE item_id = ?5",
+            params![
+                state_machine::STATUS_UNDO_SKIPPED_MODIFIED,
+                "E_UNDO_MODIFIED",
+                message,
+                Utc::now().to_rfc3339(),
+                item_id
+            ],
+        )?;
+        ensure_updated(rows, "item", item_id)?;
+        Ok(())
+    }
+
     pub fn retry_failed_items_by_batch(&self, batch_id: &str) -> Result<usize> {
         self.get_batch(batch_id)?;
         let rows = self.conn.execute(
@@ -295,6 +327,15 @@ impl<'a> Repository<'a> {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn delete_manifest_by_item(&self, item_id: &str) -> Result<usize> {
+        self.conn
+            .execute(
+                "DELETE FROM manifest_records WHERE item_id = ?1",
+                params![item_id],
+            )
+            .map_err(Into::into)
     }
 
     pub fn find_manifest_by_hash(&self, target_id: &str, sha256: &str) -> Result<Option<String>> {
@@ -474,6 +515,10 @@ mod tests {
         assert!(repo
             .mark_item_failed("missing", "E_TEST", "failed")
             .is_err());
+        assert!(repo.mark_item_undone("missing").is_err());
+        assert!(repo
+            .mark_item_undo_skipped_modified("missing", "modified")
+            .is_err());
     }
 
     #[test]
@@ -597,5 +642,43 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "item.failed");
         assert_eq!(events[0].payload_json["error_code"], "E_TEST");
+    }
+
+    #[test]
+    fn delete_manifest_by_item_removes_only_matching_rows() {
+        let (conn, _batch, item) = repo_with_conn();
+        let repo = Repository::new(&conn);
+        let first = ManifestRecord::new(
+            item.item_id.clone(),
+            item.target_id.clone(),
+            item.source_path.clone(),
+            "vault/source.md".to_string(),
+            item.source_name.clone(),
+            item.file_ext.clone(),
+            Some(3),
+            "hash-1".to_string(),
+        );
+        let second = ManifestRecord::new(
+            "other-item".to_string(),
+            item.target_id.clone(),
+            "other.md".to_string(),
+            "vault/other.md".to_string(),
+            "other.md".to_string(),
+            Some("md".to_string()),
+            Some(5),
+            "hash-2".to_string(),
+        );
+        repo.insert_manifest(&first).unwrap();
+        repo.insert_manifest(&second).unwrap();
+
+        let removed = repo.delete_manifest_by_item(&item.item_id).unwrap();
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM manifest_records", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+
+        assert_eq!(removed, 1);
+        assert_eq!(remaining, 1);
     }
 }
