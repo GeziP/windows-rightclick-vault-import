@@ -136,6 +136,16 @@ impl<'a> Repository<'a> {
             .map_err(Into::into)
     }
 
+    pub fn count_queued_items_by_target(&self, target_id: &str) -> Result<i64> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM items WHERE target_id = ?1 AND status = ?2",
+                params![target_id, state_machine::STATUS_QUEUED],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
     pub fn next_queued_item(&self) -> Result<Option<ItemJob>> {
         self.conn
             .query_row(

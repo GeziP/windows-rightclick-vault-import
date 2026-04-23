@@ -74,7 +74,10 @@ pub enum ConfigCommands {
 #[derive(Subcommand, Debug)]
 pub enum TargetCommands {
     #[command(about = "List configured vault targets")]
-    List,
+    List {
+        #[arg(long, help = "Include archived targets")]
+        include_archived: bool,
+    },
     #[command(about = "Show one configured vault target")]
     Show {
         #[arg(help = "Target ID or name")]
@@ -98,6 +101,8 @@ pub enum TargetCommands {
     Remove {
         #[arg(help = "Target ID or name")]
         target: String,
+        #[arg(long, help = "Archive the target even if queued items exist")]
+        force: bool,
     },
     #[command(about = "Make a target the default import target")]
     SetDefault {
@@ -352,22 +357,46 @@ pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
 
 pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
     match command {
-        TargetCommands::List => {
-            for (index, target) in app.config.targets.iter().enumerate() {
-                let marker = if index == 0 { "*" } else { " " };
-                println!(
-                    "{marker} {}  {}  {}",
-                    target.target_id,
-                    target.name,
-                    target.root_path.display()
-                );
+        TargetCommands::List { include_archived } => {
+            if include_archived {
+                println!("default  target  name  status  path");
+            }
+            for (index, target) in app
+                .config
+                .targets
+                .iter()
+                .enumerate()
+                .filter(|(_, target)| include_archived || target.is_active())
+            {
+                let marker = if index == 0 && target.is_active() {
+                    "*"
+                } else {
+                    " "
+                };
+                if include_archived {
+                    println!(
+                        "{marker}  {}  {}  {}  {}",
+                        target.target_id,
+                        target.name,
+                        target.status,
+                        target.root_path.display()
+                    );
+                } else {
+                    println!(
+                        "{marker} {}  {}  {}",
+                        target.target_id,
+                        target.name,
+                        target.root_path.display()
+                    );
+                }
             }
             Ok(())
         }
         TargetCommands::Show { target } => {
-            let target = app.config.target_by_id(&target)?;
+            let target = app.config.target_any_by_id(&target)?;
             println!("Target: {}", target.target_id);
             println!("Name: {}", target.name);
+            println!("Status: {}", target.status);
             println!("Path: {}", target.root_path.display());
             Ok(())
         }
@@ -388,14 +417,28 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             println!("Path: {}", target.root_path.display());
             Ok(())
         }
-        TargetCommands::Remove { target } => {
+        TargetCommands::Remove { target, force } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
+            let target_to_remove = config.target_any_by_id(&target)?;
+            let conn = app.open_conn()?;
+            let repo = Repository::new(&conn);
+            let queued = repo.count_queued_items_by_target(&target_to_remove.target_id)?;
+            if queued > 0 && !force {
+                anyhow::bail!(
+                    "Cannot remove target '{}' - {} pending job(s) exist. Process or cancel them first.",
+                    target_to_remove.name,
+                    queued
+                );
+            }
+            if queued > 0 {
+                eprintln!(
+                    "WARN: Target '{}' had {} queued item(s) - forced archive.",
+                    target_to_remove.name, queued
+                );
+            }
             let removed = config.remove_target(&target)?;
             config.save()?;
-            println!("Removed target: {}", removed.target_id);
-            if let Ok(default_target) = config.default_target() {
-                println!("Default target: {}", default_target.target_id);
-            }
+            println!("Archived target: {}", removed.target_id);
             Ok(())
         }
         TargetCommands::SetDefault { target } => {
@@ -649,7 +692,7 @@ mod tests {
     }
 
     #[test]
-    fn targets_remove_persists_target_deletion() {
+    fn targets_remove_archives_target() {
         let temp = tempfile::tempdir().unwrap();
         let app = test_app(&temp);
         handle_targets(
@@ -666,14 +709,134 @@ mod tests {
             &app,
             TargetCommands::Remove {
                 target: "archive".to_string(),
+                force: false,
             },
         )
         .unwrap();
 
         let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
-        assert_eq!(reloaded.config.targets.len(), 1);
+        assert_eq!(reloaded.config.targets.len(), 2);
         assert_eq!(reloaded.config.targets[0].target_id, "default");
+        assert_eq!(
+            reloaded.config.target_any_by_id("archive").unwrap().status,
+            "archived"
+        );
         assert!(reloaded.config.target_by_id("archive").is_err());
+    }
+
+    #[test]
+    fn targets_remove_rejects_target_with_queued_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: temp.path().join("archive"),
+            },
+        )
+        .unwrap();
+        let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        let source = temp.path().join("note.md");
+        fs::write(&source, "hello").unwrap();
+        handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+
+        let err = handle_targets(
+            &app,
+            TargetCommands::Remove {
+                target: "archive".to_string(),
+                force: false,
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("pending job"));
+        let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        assert_eq!(
+            reloaded.config.target_by_id("archive").unwrap().status,
+            "active"
+        );
+    }
+
+    #[test]
+    fn targets_remove_force_archives_target_with_queued_items() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: temp.path().join("archive"),
+            },
+        )
+        .unwrap();
+        let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        let source = temp.path().join("note.md");
+        fs::write(&source, "hello").unwrap();
+        handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+
+        handle_targets(
+            &app,
+            TargetCommands::Remove {
+                target: "archive".to_string(),
+                force: true,
+            },
+        )
+        .unwrap();
+
+        let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        assert_eq!(
+            reloaded.config.target_any_by_id("archive").unwrap().status,
+            "archived"
+        );
+    }
+
+    #[test]
+    fn archived_targets_reject_rename_set_default_and_import() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: temp.path().join("archive"),
+            },
+        )
+        .unwrap();
+        let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        handle_targets(
+            &app,
+            TargetCommands::Remove {
+                target: "archive".to_string(),
+                force: false,
+            },
+        )
+        .unwrap();
+        let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        let source = temp.path().join("note.md");
+        fs::write(&source, "hello").unwrap();
+
+        let rename_err = handle_targets(
+            &app,
+            TargetCommands::Rename {
+                target: "archive".to_string(),
+                new_name: "notes".to_string(),
+            },
+        )
+        .unwrap_err();
+        let default_err = handle_targets(
+            &app,
+            TargetCommands::SetDefault {
+                target: "archive".to_string(),
+            },
+        )
+        .unwrap_err();
+        let import_err =
+            handle_import(&app, Some("archive".to_string()), vec![source]).unwrap_err();
+
+        assert!(rename_err.to_string().contains("archived"));
+        assert!(default_err.to_string().contains("archived"));
+        assert!(import_err.to_string().contains("archived"));
     }
 
     #[test]

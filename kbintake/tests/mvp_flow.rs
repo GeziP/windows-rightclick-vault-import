@@ -487,6 +487,74 @@ fn cli_import_dry_run_json_outputs_preview_array() {
         .ends_with("preview.md"));
 }
 
+#[test]
+fn cli_targets_list_hides_archived_targets_by_default() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let archive_path = temp.path().join("archive");
+    fs::create_dir(&archive_path).unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "add", "archive"])
+        .arg(&archive_path)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "remove", "archive"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let active = kbintake_command(&app_data_dir)
+        .args(["targets", "list"])
+        .output()
+        .unwrap();
+    let all = kbintake_command(&app_data_dir)
+        .args(["targets", "list", "--include-archived"])
+        .output()
+        .unwrap();
+
+    assert!(!String::from_utf8_lossy(&active.stdout).contains("archive"));
+    assert!(String::from_utf8_lossy(&all.stdout).contains("archived"));
+}
+
+#[test]
+fn cli_targets_remove_pending_jobs_returns_operation_rejected() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let archive_path = temp.path().join("archive");
+    fs::create_dir(&archive_path).unwrap();
+    let source = temp.path().join("note.md");
+    fs::write(&source, "hello").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "add", "archive"])
+        .arg(&archive_path)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--target", "archive"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["targets", "remove", "archive"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::OPERATION_REJECTED)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ERROR [5]:"));
+}
+
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {
     conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",

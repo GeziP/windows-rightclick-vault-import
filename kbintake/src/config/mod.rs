@@ -56,13 +56,21 @@ impl AppConfig {
     }
 
     pub fn default_target(&self) -> Result<Target> {
-        self.targets
+        let target = self
+            .targets
             .first()
-            .cloned()
-            .context("no import target configured")
+            .context("no import target configured")?;
+        ensure_target_active(target)?;
+        Ok(target.clone())
     }
 
     pub fn target_by_id(&self, target_id: &str) -> Result<Target> {
+        let target = self.target_any_by_id(target_id)?;
+        ensure_target_active(&target)?;
+        Ok(target)
+    }
+
+    pub fn target_any_by_id(&self, target_id: &str) -> Result<Target> {
         self.targets
             .iter()
             .find(|target| target.target_id == target_id || target.name == target_id)
@@ -75,7 +83,7 @@ impl AppConfig {
         if self
             .targets
             .iter()
-            .any(|target| target.target_id == name || target.name == name)
+            .any(|target| target.is_active() && (target.target_id == name || target.name == name))
         {
             bail!("target already configured: {name}");
         }
@@ -87,6 +95,7 @@ impl AppConfig {
 
     pub fn set_default_target_by_id(&mut self, target_id: &str) -> Result<Target> {
         let index = self.target_index(target_id)?;
+        ensure_target_active(&self.targets[index])?;
         let target = self.targets.remove(index);
         self.targets.insert(0, target.clone());
         Ok(target)
@@ -100,7 +109,8 @@ impl AppConfig {
         let target_id = target_id.as_ref();
         let new_name = validate_target_name(new_name.into())?;
         if self.targets.iter().any(|target| {
-            (target.target_id == new_name || target.name == new_name)
+            target.is_active()
+                && (target.target_id == new_name || target.name == new_name)
                 && target.target_id != target_id
                 && target.name != target_id
         }) {
@@ -108,18 +118,17 @@ impl AppConfig {
         }
 
         let index = self.target_index(target_id)?;
+        ensure_target_active(&self.targets[index])?;
         self.targets[index].target_id = new_name.clone();
         self.targets[index].name = new_name;
         Ok(self.targets[index].clone())
     }
 
     pub fn remove_target(&mut self, target_id: &str) -> Result<Target> {
-        if self.targets.len() <= 1 {
-            bail!("cannot remove the last configured target");
-        }
-
         let index = self.target_index(target_id)?;
-        Ok(self.targets.remove(index))
+        ensure_target_active(&self.targets[index])?;
+        self.targets[index].archive();
+        Ok(self.targets[index].clone())
     }
 
     fn target_index(&self, target_id: &str) -> Result<usize> {
@@ -158,6 +167,13 @@ impl AppConfig {
         }
         Ok(target)
     }
+}
+
+fn ensure_target_active(target: &Target) -> Result<()> {
+    if !target.is_active() {
+        bail!("Target '{}' is archived and cannot be used.", target.name);
+    }
+    Ok(())
 }
 
 fn validate_target_name(name: String) -> Result<String> {
@@ -285,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_non_default_target_preserves_default() {
+    fn remove_non_default_target_archives_and_preserves_default() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
         config
@@ -295,12 +311,13 @@ mod tests {
         let removed = config.remove_target("archive").unwrap();
 
         assert_eq!(removed.target_id, "archive");
-        assert_eq!(config.targets.len(), 1);
+        assert_eq!(removed.status, "archived");
+        assert_eq!(config.targets.len(), 2);
         assert_eq!(config.targets[0].target_id, "default");
     }
 
     #[test]
-    fn remove_default_target_promotes_next_target() {
+    fn remove_default_target_archives_without_promoting_next_target() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
         config
@@ -310,20 +327,24 @@ mod tests {
         let removed = config.remove_target("default").unwrap();
 
         assert_eq!(removed.target_id, "default");
-        assert_eq!(config.targets.len(), 1);
-        assert_eq!(config.targets[0].target_id, "archive");
+        assert_eq!(removed.status, "archived");
+        assert_eq!(config.targets.len(), 2);
+        assert_eq!(config.targets[0].target_id, "default");
+        assert!(config
+            .default_target()
+            .unwrap_err()
+            .to_string()
+            .contains("archived"));
     }
 
     #[test]
-    fn remove_target_rejects_last_target() {
+    fn remove_target_allows_archiving_last_active_target() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
 
-        let err = config.remove_target("default").unwrap_err();
+        let removed = config.remove_target("default").unwrap();
 
-        assert!(err
-            .to_string()
-            .contains("cannot remove the last configured target"));
+        assert_eq!(removed.status, "archived");
     }
 
     #[test]

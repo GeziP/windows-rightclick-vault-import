@@ -100,7 +100,7 @@ fn command_kind(command: &JobCommands) -> JobKind {
 
 fn target_kind(command: &TargetCommands) -> TargetKind {
     match command {
-        TargetCommands::List => TargetKind::List,
+        TargetCommands::List { .. } => TargetKind::List,
         TargetCommands::Show { .. } => TargetKind::Show,
         TargetCommands::Add { .. } => TargetKind::Add,
         TargetCommands::Rename { .. } => TargetKind::Rename,
@@ -134,10 +134,11 @@ fn classify_error(kind: CommandKind, err: &Error) -> i32 {
     }
 
     let message = err.to_string();
+    let lower_message = message.to_ascii_lowercase();
     if message.contains("target not configured") {
         return exit_codes::TARGET_NOT_FOUND;
     }
-    if message.contains("cannot remove") {
+    if lower_message.contains("cannot remove") || lower_message.contains("archived") {
         return exit_codes::OPERATION_REJECTED;
     }
     if matches!(kind, CommandKind::Config) {
