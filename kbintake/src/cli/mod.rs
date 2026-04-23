@@ -55,7 +55,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: ExplorerCommands,
     },
-    Doctor,
+    Doctor {
+        #[arg(long, help = "Apply safe automatic fixes")]
+        fix: bool,
+    },
     ConfigShow,
 }
 
@@ -75,6 +78,8 @@ pub enum JobCommands {
         batch_id: String,
         #[arg(long, help = "Output as JSON")]
         json: bool,
+        #[arg(long, help = "Output as table")]
+        table: bool,
     },
     Retry {
         batch_id: String,
@@ -210,9 +215,9 @@ pub fn handle_import(
         anyhow::bail!("no input paths provided");
     }
 
-    let target = match target_id {
-        Some(target_id) => app.config.target_by_id(&target_id)?,
-        None => app.config.default_target()?,
+    let explicit_target = match target_id {
+        Some(target_id) => Some(app.config.target_by_id(&target_id)?),
+        None => None,
     };
     let mut files = Vec::new();
     for path in paths {
@@ -226,7 +231,20 @@ pub fn handle_import(
 
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
-    let batch = BatchJob::new("cli", &target.target_id, files.len() as i64);
+    let routed_files = files
+        .into_iter()
+        .map(|file| {
+            let target = match &explicit_target {
+                Some(target) => target.clone(),
+                None => app.config.target_for_path(&file)?,
+            };
+            Ok((file, target))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let batch_target_id = common_target_id(&routed_files)
+        .unwrap_or("mixed")
+        .to_string();
+    let batch = BatchJob::new("cli", &batch_target_id, routed_files.len() as i64);
     repo.insert_batch(&batch)?;
     repo.insert_event(&DomainEvent::new(
         "batch",
@@ -240,7 +258,7 @@ pub fn handle_import(
     ))?;
 
     let mut count = 0usize;
-    for file in files {
+    for (file, target) in routed_files {
         let item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
         repo.insert_item(&item)?;
         repo.insert_event(&DomainEvent::new(
@@ -259,12 +277,25 @@ pub fn handle_import(
     info!(batch_id = %batch.batch_id, items = count, "batch queued");
     println!("Queued batch: {}", batch.batch_id);
     println!("Items queued: {}", count);
-    println!("Target: {}", target.name);
+    let target_name = if batch_target_id == "mixed" {
+        "mixed".to_string()
+    } else {
+        app.config.target_any_by_id(&batch_target_id)?.name
+    };
+    println!("Target: {}", target_name);
     Ok(ImportOutcome {
         batch_id: batch.batch_id,
         item_count: count,
-        target_name: target.name,
+        target_name,
     })
+}
+
+fn common_target_id(routed_files: &[(PathBuf, crate::domain::Target)]) -> Option<&str> {
+    let first = routed_files.first()?.1.target_id.as_str();
+    routed_files
+        .iter()
+        .all(|(_, target)| target.target_id == first)
+        .then_some(first)
 }
 
 pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
@@ -276,8 +307,9 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             status,
             limit,
             json,
-            table: _table,
+            table,
         } => {
+            ensure_job_output_mode(json, table)?;
             let status = parse_batch_status_filter(status)?;
             let rows = repo.list_batches_filtered(limit as i64, status.as_deref())?;
             if json {
@@ -296,19 +328,18 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
                 return Ok(exit_codes::SUCCESS);
             }
 
-            println!(
-                "{:<36}  {:<18}  {:>5}  {:<12}  created_at",
-                "batch_id", "status", "items", "target"
-            );
+            println!("{}", format_job_list_header());
             for row in rows {
-                println!(
-                    "{:<36}  {:<18}  {:>5}  {:<12}  {}",
-                    row.batch_id, row.status, row.source_count, row.target_id, row.created_at
-                );
+                println!("{}", format_job_list_row(&row));
             }
             Ok(exit_codes::SUCCESS)
         }
-        JobCommands::Show { batch_id, json } => {
+        JobCommands::Show {
+            batch_id,
+            json,
+            table,
+        } => {
+            ensure_job_output_mode(json, table)?;
             let batch = repo.get_batch(&batch_id)?;
             let items = repo.list_items_by_batch(&batch_id)?;
             if json {
@@ -335,11 +366,15 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
                 println!("{}", serde_json::to_string_pretty(&out)?);
                 return Ok(exit_codes::SUCCESS);
             }
+
             println!("Batch: {}", batch.batch_id);
             println!("Status: {}", batch.status);
+            println!("Source: {}", batch.source);
+            println!("Target: {}", batch.target_id);
             println!("Items: {}", items.len());
+            println!("{}", format_job_show_header());
             for item in items {
-                println!("{}", format_item_line(item));
+                println!("{}", format_job_show_row(&item));
             }
             print_events(&repo, "batch", &batch.batch_id)?;
             for item in repo.list_items_by_batch(&batch_id)? {
@@ -369,7 +404,22 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             Ok(exit_codes::SUCCESS)
         }
         JobCommands::Undo { batch_id, force } => {
-            let _batch = repo.get_batch(&batch_id)?;
+            let batch = repo.get_batch(&batch_id)?;
+            if batch.status == crate::queue::state_machine::STATUS_UNDONE
+                || batch.status == crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
+            {
+                println!("Batch already undone: {}", batch.batch_id);
+                return Ok(exit_codes::SUCCESS);
+            }
+            if batch.status == crate::queue::state_machine::STATUS_QUEUED
+                || batch.status == crate::queue::state_machine::STATUS_RUNNING
+            {
+                anyhow::bail!(
+                    "Cannot undo batch '{}' while it is {}.",
+                    batch.batch_id,
+                    batch.status
+                );
+            }
             let items = repo.list_items_by_batch(&batch_id)?;
             let mut deleted_count = 0usize;
             let mut skipped_modified_count = 0usize;
@@ -399,9 +449,19 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
 
                 let path = PathBuf::from(&stored_path);
                 if path.exists() {
-                    let current_hash = crate::processor::hasher::sha256_file(&path)?;
                     let expected_hash = item.sha256.as_deref().unwrap_or_default();
-                    if current_hash != expected_hash {
+                    let hash_matches = if app.config.import.inject_frontmatter
+                        && crate::processor::frontmatter::is_markdown_extension(
+                            item.file_ext.as_deref(),
+                        ) {
+                        crate::processor::frontmatter::file_matches_original_hash(
+                            &path,
+                            expected_hash,
+                        )?
+                    } else {
+                        crate::processor::hasher::sha256_file(&path)? == expected_hash
+                    };
+                    if !hash_matches {
                         let warning = format!(
                             "File '{}' skipped during undo - content has been modified since import.",
                             stored_path
@@ -490,26 +550,65 @@ fn format_event_line(event: DomainEvent) -> String {
     )
 }
 
-fn format_item_line(item: ItemJob) -> String {
+fn ensure_job_output_mode(json: bool, table: bool) -> Result<()> {
+    if json && table {
+        anyhow::bail!("--json and --table cannot be used together");
+    }
+    Ok(())
+}
+
+fn format_job_list_header() -> String {
     format!(
-        "- {} [{}] target={} {} -> {}{}{}{}",
-        item.item_id,
-        item.status,
-        item.target_id,
-        item.source_path,
-        item.stored_path.unwrap_or_else(|| "-".to_string()),
-        item.stage
-            .map(|stage| format!(" stage={stage}"))
-            .unwrap_or_default(),
-        item.duplicate_of
-            .map(|duplicate_of| format!(" duplicate_of={duplicate_of}"))
-            .unwrap_or_default(),
-        match (item.error_code, item.error_message) {
-            (Some(code), Some(message)) => format!(" error={code}: {message}"),
-            (Some(code), None) => format!(" error={code}"),
-            _ => String::new(),
-        }
+        "{:<36}  {:<18}  {:>5}  {:<12}  {}",
+        "batch_id", "status", "items", "target", "created_at"
     )
+}
+
+fn format_job_list_row(row: &BatchJob) -> String {
+    format!(
+        "{:<36}  {:<18}  {:>5}  {:<12}  {}",
+        truncate_cell(&row.batch_id, 36),
+        truncate_cell(&row.status, 18),
+        row.source_count,
+        truncate_cell(&row.target_id, 12),
+        row.created_at
+    )
+}
+
+fn format_job_show_header() -> String {
+    format!(
+        "{:<36}  {:<22}  {:<12}  {:<32}  {:<32}  {}",
+        "item_id", "status", "target", "source", "stored", "error"
+    )
+}
+
+fn format_job_show_row(item: &ItemJob) -> String {
+    let error = match (&item.error_code, &item.error_message) {
+        (Some(code), Some(message)) => format!("{code}: {message}"),
+        (Some(code), None) => code.clone(),
+        _ => String::new(),
+    };
+    format!(
+        "{:<36}  {:<22}  {:<12}  {:<32}  {:<32}  {}",
+        truncate_cell(&item.item_id, 36),
+        truncate_cell(&item.status, 22),
+        truncate_cell(&item.target_id, 12),
+        truncate_cell(&item.source_path, 32),
+        truncate_cell(item.stored_path.as_deref().unwrap_or("-"), 32),
+        truncate_cell(&error, 40)
+    )
+}
+
+fn truncate_cell(value: &str, width: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count <= width {
+        return value.to_string();
+    }
+    if width <= 3 {
+        return ".".repeat(width);
+    }
+    let prefix = value.chars().take(width - 3).collect::<String>();
+    format!("{prefix}...")
 }
 
 #[derive(Debug, Serialize)]
@@ -565,21 +664,154 @@ fn parse_batch_status_filter(status: Option<String>) -> Result<Option<String>> {
     anyhow::bail!("unsupported status filter: {status}");
 }
 
-pub fn handle_doctor(app: &App) -> Result<()> {
-    let target = app.config.default_target()?;
-    let conn = app.open_conn()?;
-    crate::db::validate_schema(&conn)?;
-    config::validate_target_root(&target.root_path)?;
+pub fn handle_doctor(app: &App, fix: bool) -> Result<i32> {
+    let mut failed = false;
     println!("Config dir: {}", app.config.app_data_dir.display());
     println!("Database: {}", app.db_path.display());
-    println!(
-        "Default target: {} ({})",
-        target.name,
-        target.root_path.display()
-    );
-    println!("Schema: ok");
-    println!("Target: ok");
-    Ok(())
+
+    let config_path = app.config.config_path();
+    if config_path.exists() {
+        print_doctor_ok("Config file", &format!("{}", config_path.display()));
+    } else {
+        failed = true;
+        print_doctor_fail(
+            "Config file",
+            &format!("missing at {}", config_path.display()),
+            "Run: kbintake doctor --fix",
+        );
+    }
+
+    match app
+        .open_conn()
+        .and_then(|conn| crate::db::validate_schema(&conn))
+    {
+        Ok(()) => print_doctor_ok("Database schema", "ok"),
+        Err(err) => {
+            failed = true;
+            print_doctor_fail(
+                "Database schema",
+                &err.to_string(),
+                "Check that the app data directory is writable; future migration support will add: kbintake doctor --migrate",
+            );
+        }
+    }
+
+    match app.config.default_target() {
+        Ok(target) => {
+            println!(
+                "Default target: {} ({})",
+                target.name,
+                target.root_path.display()
+            );
+            match check_target_root(&target.root_path, fix) {
+                Ok(()) => print_doctor_ok(
+                    "Target directory",
+                    &format!("{}", target.root_path.display()),
+                ),
+                Err(DoctorFailure { message, hint }) => {
+                    failed = true;
+                    print_doctor_fail("Target directory", &message, &hint);
+                }
+            }
+        }
+        Err(err) => {
+            failed = true;
+            print_doctor_fail(
+                "Default target",
+                &err.to_string(),
+                "Run: kbintake config set-target <path>",
+            );
+        }
+    }
+
+    if crate::explorer::is_installed().unwrap_or(false) {
+        print_doctor_ok("Explorer context menu", "registered");
+    } else {
+        print_doctor_warn(
+            "Explorer context menu",
+            "not registered",
+            "Run: kbintake explorer install",
+        );
+    }
+
+    for warning in app.config.routing_warnings() {
+        print_doctor_warn(
+            "Routing",
+            &warning,
+            "Run: kbintake targets add <name> <path> or update config.toml",
+        );
+    }
+
+    if command_on_path("kbintake") {
+        print_doctor_ok("PATH", "kbintake found");
+    } else {
+        print_doctor_warn(
+            "PATH",
+            "kbintake not found on PATH",
+            "Add %LOCALAPPDATA%\\Programs\\kbintake to your PATH",
+        );
+    }
+
+    if failed {
+        Ok(exit_codes::GENERAL_ERROR)
+    } else {
+        Ok(exit_codes::SUCCESS)
+    }
+}
+
+struct DoctorFailure {
+    message: String,
+    hint: String,
+}
+
+fn check_target_root(
+    root_path: &std::path::Path,
+    fix: bool,
+) -> std::result::Result<(), DoctorFailure> {
+    if root_path.exists() && !root_path.is_dir() {
+        return Err(DoctorFailure {
+            message: format!(
+                "path exists but is not a directory: {}",
+                root_path.display()
+            ),
+            hint: "Run: kbintake config set-target <existing-directory>".to_string(),
+        });
+    }
+    if !root_path.exists() && !fix {
+        return Err(DoctorFailure {
+            message: format!("missing: {}", root_path.display()),
+            hint: "Run: kbintake doctor --fix or kbintake config set-target <existing-directory>"
+                .to_string(),
+        });
+    }
+    config::validate_target_root(root_path).map_err(|err| DoctorFailure {
+        message: err.to_string(),
+        hint: "Check folder permissions or run: kbintake config set-target <writable-directory>"
+            .to_string(),
+    })
+}
+
+fn print_doctor_ok(check: &str, detail: &str) {
+    println!("[OK] {check}: {detail}");
+}
+
+fn print_doctor_warn(check: &str, detail: &str, hint: &str) {
+    println!("[WARN] {check}: {detail}");
+    println!("  Hint: {hint}");
+}
+
+fn print_doctor_fail(check: &str, detail: &str, hint: &str) {
+    println!("[FAIL] {check}: {detail}");
+    println!("  Hint: {hint}");
+}
+
+fn command_on_path(command: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|path| {
+            let candidate = path.join(command);
+            candidate.exists() || candidate.with_extension("exe").exists()
+        })
+    })
 }
 
 pub fn handle_config_show(app: &App) -> Result<()> {
@@ -887,8 +1119,8 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        format_event_line, format_item_line, handle_config, handle_import, handle_import_command,
-        handle_targets, ConfigCommands, TargetCommands,
+        format_event_line, format_job_show_row, handle_config, handle_import,
+        handle_import_command, handle_targets, ConfigCommands, TargetCommands,
     };
     use crate::app::App;
     use crate::config::{AppConfig, ImportConfig};
@@ -911,7 +1143,9 @@ mod tests {
                 targets: vec![Target::new("default", temp.path().join("vault"))],
                 import: ImportConfig {
                     max_file_size_mb: 512,
+                    inject_frontmatter: true,
                 },
+                routing: Vec::new(),
             },
             db_path,
         }
@@ -1299,7 +1533,7 @@ mod tests {
     }
 
     #[test]
-    fn jobs_item_line_includes_target_and_failure_details() {
+    fn jobs_show_row_includes_target_and_failure_details() {
         let mut item = ItemJob::new(
             "batch".to_string(),
             "archive".to_string(),
@@ -1309,10 +1543,10 @@ mod tests {
         item.error_code = Some("E_TEST".to_string());
         item.error_message = Some("test failure".to_string());
 
-        let line = format_item_line(item);
+        let line = format_job_show_row(&item);
 
-        assert!(line.contains("target=archive"));
-        assert!(line.contains("error=E_TEST: test failure"));
+        assert!(line.contains("archive"));
+        assert!(line.contains("E_TEST: test failure"));
     }
 
     #[test]

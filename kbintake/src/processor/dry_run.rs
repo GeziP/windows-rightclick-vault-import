@@ -44,13 +44,12 @@ pub fn preview_import(
         anyhow::bail!("no input paths provided");
     }
 
-    let target = match target_id {
-        Some(target_id) => app.config.target_by_id(&target_id)?,
-        None => app.config.default_target()?,
+    let explicit_target = match target_id {
+        Some(target_id) => Some(app.config.target_by_id(&target_id)?),
+        None => None,
     };
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
-    let adapter = LocalFolderAdapter::new(&target.root_path);
     let mut rows = Vec::new();
 
     for path in paths {
@@ -81,11 +80,16 @@ pub fn preview_import(
 
             let hash = hasher::sha256_file(&file)
                 .with_context(|| format!("failed to hash {}", file.display()))?;
+            let target = match &explicit_target {
+                Some(target) => target.clone(),
+                None => app.config.target_for_path(&file)?,
+            };
             if deduper::find_duplicate_record(&repo, &target.target_id, &hash)?.is_some() {
                 rows.push(row(&file, None, DryRunAction::SkipDuplicate));
                 continue;
             }
 
+            let adapter = LocalFolderAdapter::new(&target.root_path);
             let source_name = file
                 .file_name()
                 .map(|value| value.to_string_lossy().to_string())
@@ -157,7 +161,9 @@ mod tests {
                 targets: vec![Target::new("default", temp.path().join("vault"))],
                 import: ImportConfig {
                     max_file_size_mb: 512,
+                    inject_frontmatter: true,
                 },
+                routing: Vec::new(),
             },
             db_path,
         }

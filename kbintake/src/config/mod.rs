@@ -11,11 +11,21 @@ pub struct AppConfig {
     pub app_data_dir: PathBuf,
     pub targets: Vec<Target>,
     pub import: ImportConfig,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routing: Vec<RoutingRule>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportConfig {
     pub max_file_size_mb: u64,
+    #[serde(default = "default_inject_frontmatter")]
+    pub inject_frontmatter: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoutingRule {
+    pub extensions: Vec<String>,
+    pub target: String,
 }
 
 impl AppConfig {
@@ -48,7 +58,9 @@ impl AppConfig {
             targets: vec![Target::new("default", target_root)],
             import: ImportConfig {
                 max_file_size_mb: 512,
+                inject_frontmatter: true,
             },
+            routing: Vec::new(),
         };
 
         config.save()?;
@@ -68,6 +80,30 @@ impl AppConfig {
         let target = self.target_any_by_id(target_id)?;
         ensure_target_active(&target)?;
         Ok(target)
+    }
+
+    pub fn target_for_path(&self, path: &std::path::Path) -> Result<Target> {
+        if let Some(extension) = path.extension().map(|value| value.to_string_lossy()) {
+            let normalized = format!(".{}", extension).to_ascii_lowercase();
+            for rule in &self.routing {
+                if rule
+                    .extensions
+                    .iter()
+                    .any(|candidate| normalize_extension(candidate) == normalized)
+                {
+                    return self.target_by_id(&rule.target);
+                }
+            }
+        }
+        self.default_target()
+    }
+
+    pub fn routing_warnings(&self) -> Vec<String> {
+        self.routing
+            .iter()
+            .filter(|rule| self.target_any_by_id(&rule.target).is_err())
+            .map(|rule| format!("routing rule references missing target '{}'", rule.target))
+            .collect()
     }
 
     pub fn target_any_by_id(&self, target_id: &str) -> Result<Target> {
@@ -169,6 +205,10 @@ impl AppConfig {
     }
 }
 
+fn default_inject_frontmatter() -> bool {
+    true
+}
+
 fn ensure_target_active(target: &Target) -> Result<()> {
     if !target.is_active() {
         bail!("Target '{}' is archived and cannot be used.", target.name);
@@ -188,6 +228,15 @@ fn validate_target_name(name: String) -> Result<String> {
         bail!("target name may only contain letters, numbers, '-' and '_'");
     }
     Ok(name)
+}
+
+fn normalize_extension(extension: &str) -> String {
+    let trimmed = extension.trim().to_ascii_lowercase();
+    if trimmed.starts_with('.') {
+        trimmed
+    } else {
+        format!(".{trimmed}")
+    }
 }
 
 pub fn validate_target_root(root_path: &std::path::Path) -> Result<()> {
@@ -213,7 +262,7 @@ pub fn validate_target_root(root_path: &std::path::Path) -> Result<()> {
 mod tests {
     use std::fs;
 
-    use super::{validate_target_root, AppConfig};
+    use super::{validate_target_root, AppConfig, RoutingRule};
 
     #[test]
     fn saves_and_reloads_updated_default_target() {
@@ -375,6 +424,52 @@ mod tests {
         assert_eq!(target.target_id, "archive");
         assert_eq!(config.targets[0].target_id, "archive");
         assert_eq!(config.targets[1].target_id, "default");
+    }
+
+    #[test]
+    fn target_for_path_uses_case_insensitive_routing_rule() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        config.routing.push(RoutingRule {
+            extensions: vec![".PDF".to_string()],
+            target: "archive".to_string(),
+        });
+
+        let target = config
+            .target_for_path(std::path::Path::new("report.pdf"))
+            .unwrap();
+
+        assert_eq!(target.target_id, "archive");
+    }
+
+    #[test]
+    fn target_for_path_falls_back_to_default_without_matching_rule() {
+        let temp = tempfile::tempdir().unwrap();
+        let config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+
+        let target = config
+            .target_for_path(std::path::Path::new("note.md"))
+            .unwrap();
+
+        assert_eq!(target.target_id, "default");
+    }
+
+    #[test]
+    fn routing_warnings_report_missing_targets() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.routing.push(RoutingRule {
+            extensions: vec![".pdf".to_string()],
+            target: "missing".to_string(),
+        });
+
+        let warnings = config.routing_warnings();
+
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("missing"));
     }
 
     #[test]

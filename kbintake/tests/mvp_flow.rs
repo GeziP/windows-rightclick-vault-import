@@ -6,6 +6,7 @@ use kbintake::app::App;
 use kbintake::cli::{
     handle_import, handle_import_command, handle_jobs, handle_targets, JobCommands, TargetCommands,
 };
+use kbintake::config::RoutingRule;
 use kbintake::queue::repository::Repository;
 use kbintake::queue::state_machine;
 use rusqlite::{params, Connection};
@@ -28,6 +29,7 @@ fn bootstraps_default_config_in_empty_app_data_dir() {
 
     assert!(app.config.app_data_dir.join("config.toml").exists());
     assert_eq!(app.config.import.max_file_size_mb, 512);
+    assert!(app.config.import.inject_frontmatter);
     assert_eq!(app.config.targets.len(), 1);
     assert_eq!(app.config.targets[0].name, "default");
     assert_eq!(
@@ -144,6 +146,84 @@ fn agent_processes_queued_import_successfully() {
 }
 
 #[test]
+fn markdown_import_injects_frontmatter_with_original_hash() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let source = temp.path().join("note.md");
+    fs::write(&source, "hello").unwrap();
+    let original_hash = kbintake::processor::hasher::sha256_file(&source).unwrap();
+
+    handle_import(&app, None, vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let stored = app.config.targets[0].root_path.join("note.md");
+    let content = fs::read_to_string(stored).unwrap();
+    assert!(content.starts_with("---\n"));
+    assert!(content.contains("kbintake_source:"));
+    assert!(content.contains(&format!("kbintake_sha256: \"{original_hash}\"")));
+    assert!(content.contains("kbintake_target: \"default\""));
+    assert!(content.ends_with("---\nhello"));
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(item.sha256.as_deref(), Some(original_hash.as_str()));
+}
+
+#[test]
+fn markdown_import_appends_to_existing_frontmatter() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let source = temp.path().join("frontmatter.md");
+    fs::write(&source, "---\ntitle: Original\n---\nbody").unwrap();
+
+    handle_import(&app, None, vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let content =
+        fs::read_to_string(app.config.targets[0].root_path.join("frontmatter.md")).unwrap();
+    assert!(content.starts_with("---\ntitle: Original\nkbintake_source:"));
+    assert_eq!(content.matches("---").count(), 2);
+    assert!(content.ends_with("---\nbody"));
+}
+
+#[test]
+fn non_markdown_import_is_not_modified() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let source = temp.path().join("note.txt");
+    fs::write(&source, "plain text").unwrap();
+
+    handle_import(&app, None, vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let content = fs::read_to_string(app.config.targets[0].root_path.join("note.txt")).unwrap();
+    assert_eq!(content, "plain text");
+}
+
+#[test]
+fn frontmatter_injection_can_be_disabled() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = bootstrap_temp_app(&temp);
+    app.config.import.inject_frontmatter = false;
+    app.config.save().unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("disabled.md");
+    fs::write(&source, "raw").unwrap();
+
+    handle_import(&app, None, vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let content = fs::read_to_string(app.config.targets[0].root_path.join("disabled.md")).unwrap();
+    assert_eq!(content, "raw");
+}
+
+#[test]
 fn agent_marks_duplicate_without_second_copy() {
     let temp = tempfile::tempdir().unwrap();
     let app = bootstrap_temp_app(&temp);
@@ -214,6 +294,110 @@ fn explicit_import_target_processes_into_selected_vault() {
         .root_path
         .join("archive-note.md")
         .exists());
+}
+
+#[test]
+fn import_uses_extension_routing_without_explicit_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    handle_targets(
+        &app,
+        TargetCommands::Add {
+            name: "archive".to_string(),
+            path: temp.path().join("archive-vault"),
+        },
+    )
+    .unwrap();
+    let mut config =
+        kbintake::config::AppConfig::load_or_init_in(app.config.app_data_dir.clone()).unwrap();
+    config.routing.push(RoutingRule {
+        extensions: vec![".pdf".to_string()],
+        target: "archive".to_string(),
+    });
+    config.save().unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("report.PDF");
+    fs::write(&source, "pdf").unwrap();
+
+    handle_import(&app, None, vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    assert!(temp
+        .path()
+        .join("archive-vault")
+        .join("report.PDF")
+        .exists());
+    assert!(!app.config.targets[0].root_path.join("report.PDF").exists());
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(item.target_id, "archive");
+}
+
+#[test]
+fn explicit_target_overrides_extension_routing() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    handle_targets(
+        &app,
+        TargetCommands::Add {
+            name: "archive".to_string(),
+            path: temp.path().join("archive-vault"),
+        },
+    )
+    .unwrap();
+    let mut config =
+        kbintake::config::AppConfig::load_or_init_in(app.config.app_data_dir.clone()).unwrap();
+    config.routing.push(RoutingRule {
+        extensions: vec![".pdf".to_string()],
+        target: "archive".to_string(),
+    });
+    config.save().unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("manual.pdf");
+    fs::write(&source, "pdf").unwrap();
+
+    handle_import(&app, Some("default".to_string()), vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    assert!(app.config.targets[0].root_path.join("manual.pdf").exists());
+    assert!(!temp
+        .path()
+        .join("archive-vault")
+        .join("manual.pdf")
+        .exists());
+}
+
+#[test]
+fn config_show_displays_routing_rules() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "add", "archive"])
+        .arg(temp.path().join("archive-vault"))
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let config_path = app_data_dir.join("config.toml");
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str("\n[[routing]]\nextensions = [\".pdf\"]\ntarget = \"archive\"\n");
+    fs::write(&config_path, config).unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["config", "show"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[[routing]]"));
+    assert!(stdout.contains("target = \"archive\""));
 }
 
 #[test]
@@ -485,6 +669,157 @@ fn jobs_undo_force_deletes_modified_file() {
 }
 
 #[test]
+fn jobs_undo_is_noop_for_already_undone_batch() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("undo-twice.md");
+    fs::write(&source, "undo twice").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    drop(conn);
+
+    let first = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+    assert_eq!(first.status.code(), Some(kbintake::exit_codes::SUCCESS));
+
+    let second = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+    assert_eq!(second.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(String::from_utf8_lossy(&second.stdout).contains("Batch already undone"));
+}
+
+#[test]
+fn jobs_undo_duplicate_only_batch_is_noop_success() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let first = temp.path().join("dup-first.md");
+    let second = temp.path().join("dup-second.md");
+    fs::write(&first, "same").unwrap();
+    fs::write(&second, "same").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&first)
+        .arg(&second)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+    let duplicate_item = items
+        .iter()
+        .find(|item| item.status == state_machine::STATUS_DUPLICATE)
+        .unwrap();
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+
+    let app = App::bootstrap_in(app_data_dir).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let duplicate_after = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .into_iter()
+        .find(|item| item.item_id == duplicate_item.item_id)
+        .unwrap();
+    assert_eq!(duplicate_after.status, state_machine::STATUS_DUPLICATE);
+}
+
+#[test]
+fn jobs_undo_marks_missing_destination_as_undone() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("undo-missing.md");
+    fs::write(&source, "missing later").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let stored_path = item.stored_path.clone().unwrap();
+    drop(conn);
+    fs::remove_file(&stored_path).unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Undo complete: 1 deleted, 0 skipped"));
+
+    let app = App::bootstrap_in(app_data_dir).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(item.status, state_machine::STATUS_UNDONE);
+    assert_eq!(manifest_count_for_item(&conn, &item.item_id), 0);
+}
+
+#[test]
+fn jobs_undo_rejects_queued_batch() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("queued-undo.md");
+    fs::write(&source, "queued").unwrap();
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    handle_import(&app, None, vec![source]).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::OPERATION_REJECTED)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Cannot undo batch"));
+}
+
+#[test]
 fn cli_jobs_list_json_supports_status_filter_and_limit() {
     let temp = tempfile::tempdir().unwrap();
     let app_data_dir = temp.path().join("appdata");
@@ -507,6 +842,30 @@ fn cli_jobs_list_json_supports_status_filter_and_limit() {
     let rows = rows.as_array().unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["status"], state_machine::STATUS_FAILED);
+}
+
+#[test]
+fn cli_jobs_list_table_prints_header_row() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("table-list.md");
+    fs::write(&source, "table list").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "list", "--table"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(stdout.contains("batch_id"));
+    assert!(stdout.contains("created_at"));
 }
 
 #[test]
@@ -578,11 +937,74 @@ fn cli_returns_target_not_found_exit_code_for_invalid_import_target() {
 }
 
 #[test]
+fn cli_doctor_reports_missing_target_with_hint() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+
+    let output = kbintake_command(&app_data_dir)
+        .arg("doctor")
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::GENERAL_ERROR)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[FAIL] Target directory"));
+    assert!(stdout.contains("Hint: Run: kbintake doctor --fix"));
+}
+
+#[test]
+fn cli_doctor_fix_creates_missing_target_and_reports_checks() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["doctor", "--fix"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[OK] Config file"));
+    assert!(stdout.contains("[OK] Database schema"));
+    assert!(stdout.contains("[OK] Target directory"));
+    assert!(app_data_dir.join("vault").exists());
+}
+
+#[test]
+fn cli_doctor_warns_for_missing_routing_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    assert!(kbintake_command(&app_data_dir)
+        .args(["doctor", "--fix"])
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let config_path = app_data_dir.join("config.toml");
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str("\n[[routing]]\nextensions = [\".pdf\"]\ntarget = \"missing\"\n");
+    fs::write(&config_path, config).unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["doctor", "--fix"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[WARN] Routing"));
+    assert!(stdout.contains("missing target 'missing'"));
+}
+
+#[test]
 fn cli_returns_file_size_exceeded_when_all_processed_items_exceed_limit() {
     let temp = tempfile::tempdir().unwrap();
     let app_data_dir = temp.path().join("appdata");
     assert!(kbintake_command(&app_data_dir)
-        .arg("doctor")
+        .args(["doctor", "--fix"])
         .output()
         .unwrap()
         .status
@@ -612,7 +1034,7 @@ fn cli_returns_partial_success_when_processed_batch_has_success_and_failure() {
     let temp = tempfile::tempdir().unwrap();
     let app_data_dir = temp.path().join("appdata");
     assert!(kbintake_command(&app_data_dir)
-        .arg("doctor")
+        .args(["doctor", "--fix"])
         .output()
         .unwrap()
         .status
@@ -645,7 +1067,7 @@ fn cli_returns_database_error_when_sqlite_file_cannot_be_opened() {
     let temp = tempfile::tempdir().unwrap();
     let app_data_dir = temp.path().join("appdata");
     assert!(kbintake_command(&app_data_dir)
-        .arg("doctor")
+        .args(["doctor", "--fix"])
         .output()
         .unwrap()
         .status
@@ -690,6 +1112,86 @@ fn cli_import_dry_run_prints_preview_without_creating_batch() {
     let repo = Repository::new(&conn);
     assert!(repo.list_batches(10).unwrap().is_empty());
     assert!(!app.config.targets[0].root_path.join("preview.md").exists());
+}
+
+#[test]
+fn cli_jobs_show_table_prints_header_row() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("table-show.md");
+    fs::write(&source, "table show").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "show", &batch.batch_id, "--table"])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(stdout.contains("item_id"));
+    assert!(stdout.contains("source"));
+    assert!(stdout.contains("stored"));
+}
+
+#[test]
+fn cli_jobs_list_rejects_json_and_table_together() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "list", "--json", "--table"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::INVALID_ARGUMENTS)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("--json and --table cannot be used together"));
+}
+
+#[test]
+fn cli_jobs_show_rejects_json_and_table_together() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("json-table-show.md");
+    fs::write(&source, "json table show").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "show", &batch.batch_id, "--json", "--table"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::INVALID_ARGUMENTS)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("--json and --table cannot be used together"));
 }
 
 #[test]

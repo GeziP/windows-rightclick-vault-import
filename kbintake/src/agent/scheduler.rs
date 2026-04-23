@@ -71,7 +71,9 @@ mod tests {
                 targets: vec![Target::new("default", temp.path().join("vault"))],
                 import: ImportConfig {
                     max_file_size_mb: 512,
+                    inject_frontmatter: true,
                 },
+                routing: Vec::new(),
             },
             db_path,
         }

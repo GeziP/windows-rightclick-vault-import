@@ -49,9 +49,8 @@ fn main() -> ExitCode {
         Commands::Explorer { command } => cli::handle_explorer(command)
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Explorer, err)),
-        Commands::Doctor => app::App::bootstrap()
-            .and_then(|app| cli::handle_doctor(&app))
-            .map(|()| exit_codes::SUCCESS)
+        Commands::Doctor { fix } => app::App::bootstrap()
+            .and_then(|app| cli::handle_doctor(&app, fix))
             .map_err(|err| (CommandKind::Doctor, err)),
         Commands::ConfigShow => app::App::bootstrap()
             .and_then(|app| cli::handle_config_show(&app))
@@ -146,7 +145,10 @@ fn classify_error(kind: CommandKind, err: &Error) -> i32 {
     if message.contains("target not configured") {
         return exit_codes::TARGET_NOT_FOUND;
     }
-    if lower_message.contains("cannot remove") || lower_message.contains("archived") {
+    if lower_message.contains("cannot remove")
+        || lower_message.contains("cannot undo batch")
+        || lower_message.contains("archived")
+    {
         return exit_codes::OPERATION_REJECTED;
     }
     if matches!(kind, CommandKind::Config) {
@@ -156,6 +158,7 @@ fn classify_error(kind: CommandKind, err: &Error) -> i32 {
         || message.contains("no importable files found")
         || message.contains("failed to scan path")
         || message.contains("unsupported status filter")
+        || message.contains("--json and --table cannot be used together")
         || message.contains("target already configured")
         || message.contains("target name")
         || message.contains("not a directory")

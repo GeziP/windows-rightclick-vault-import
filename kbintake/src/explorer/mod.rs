@@ -74,6 +74,20 @@ fn escape_command_path(path: &Path) -> String {
 }
 
 #[cfg(windows)]
+pub fn is_installed() -> Result<bool> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    Ok(hkcu.open_subkey(FILE_COMMAND_KEY).is_ok() && hkcu.open_subkey(DIR_COMMAND_KEY).is_ok())
+}
+
+#[cfg(not(windows))]
+pub fn is_installed() -> Result<bool> {
+    Ok(false)
+}
+
+#[cfg(windows)]
 pub fn install(options: &InstallOptions) -> Result<Vec<MenuRegistration>> {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;

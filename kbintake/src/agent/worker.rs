@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 use crate::adapter::local_folder::LocalFolderAdapter;
 use crate::app::App;
 use crate::domain::{DomainEvent, ItemJob, ManifestRecord};
-use crate::processor::{deduper, hasher, validator};
+use crate::processor::{deduper, frontmatter, hasher, validator};
 use crate::queue::repository::Repository;
 
 pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
@@ -109,6 +109,35 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
             return Ok(());
         }
     };
+
+    if app.config.import.inject_frontmatter
+        && frontmatter::is_markdown_extension(item.file_ext.as_deref())
+    {
+        repo.update_item_running(&item.item_id, "frontmatter")?;
+        if let Err(err) = frontmatter::inject_file(
+            &dest,
+            &frontmatter::FrontmatterFields {
+                source_path: item.source_path.clone(),
+                imported_at: chrono::Utc::now(),
+                sha256: hash.clone(),
+                target: target.name.clone(),
+            },
+        ) {
+            repo.mark_item_failed(&item.item_id, "E_FRONTMATTER_FAILED", &err.to_string())?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.failed",
+                serde_json::json!({
+                    "status": "failed",
+                    "error_code": "E_FRONTMATTER_FAILED",
+                    "error_message": err.to_string()
+                }),
+            )?;
+            error!(item_id = %item.item_id, error = %err, "frontmatter injection failed");
+            return Ok(());
+        }
+    }
 
     let record = ManifestRecord::new(
         item.item_id.clone(),
