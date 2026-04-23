@@ -42,7 +42,7 @@ In development / planned:
 
 ## Install From Source
 
-Install the Rust toolchain from https://rustup.rs/, then build from the crate directory:
+Install the Rust toolchain from <https://rustup.rs>, then build from the crate directory:
 
 ```powershell
 cd kbintake
@@ -220,8 +220,8 @@ GitHub Actions runs the same quality gates on `windows-latest`.
 
 ## Project Documents
 
+- [Product Requirements Document (v2)](docs/PRD.md) — **Start here before writing any code.**
 - [Contributor guide](AGENTS.md)
 - [Development roadmap](docs/ROADMAP.md)
-- [Product requirements (PRD)](docs/PRD.md)
 - [v0.1 release checklist](docs/RELEASE_CHECKLIST.md)
 - [Rust scaffold](kbintake_rust_scaffold.md)
