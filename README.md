@@ -4,10 +4,13 @@ Windows right-click vault import tool planning repository.
 
 ## Development
 
-Install the Rust toolchain, then run commands from `kbintake/`:
+Install the Rust toolchain from <https://rustup.rs/>, then run commands from `kbintake/`:
 
 ```powershell
 cargo build
+cargo test
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo run -- doctor
 cargo run -- config show
 cargo run -- config set-target <vault-path>
@@ -15,6 +18,19 @@ cargo run -- import <path>
 cargo run -- agent
 cargo run -- jobs list
 ```
+
+Local runtime state is created under `%LOCALAPPDATA%\kbintake` by default:
+
+- `config.toml` stores targets and import settings.
+- `data\kbintake.db` stores batches, items, manifests, and events.
+- `vault\` is the default target until changed with `kbintake config set-target`.
+
+Common troubleshooting:
+
+- If `cargo` is not recognized, install Rust with `rustup` and open a new PowerShell session so `PATH` is refreshed.
+- If `doctor` reports a schema or database error, check that `%LOCALAPPDATA%\kbintake\data` is writable and that no other process has locked `kbintake.db`.
+- If `doctor` reports a target error, run `cargo run -- config set-target <vault-path>` with a directory your user account can create and write to.
+- If Explorer menu commands do nothing, verify the registered command path points to the installed `kbintake.exe`, not the placeholder in the `.reg` files.
 
 ## Windows Explorer Integration
 

@@ -1,10 +1,11 @@
 pub mod schema;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use rusqlite::Connection;
 
 pub fn init_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(schema::SCHEMA)?;
+    conn.execute_batch(schema::SCHEMA)
+        .context("failed to execute database schema")?;
     Ok(())
 }
 
@@ -31,9 +32,10 @@ pub fn validate_schema(conn: &Connection) -> Result<()> {
 }
 
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> Result<i64> {
-    Ok(conn.query_row(
+    conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",
         [kind, name],
         |row| row.get(0),
-    )?)
+    )
+    .with_context(|| format!("failed to inspect sqlite schema object {kind}:{name}"))
 }
