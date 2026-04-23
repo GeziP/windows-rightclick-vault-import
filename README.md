@@ -105,6 +105,8 @@ kbintake targets list
 kbintake targets show <target>
 kbintake targets add <name> <path>
 kbintake targets set-default <target>
+kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only]
+kbintake explorer uninstall
 kbintake import [--target <target>] [--process] <path...>
 kbintake agent
 kbintake jobs list
@@ -135,7 +137,30 @@ Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ic
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor
 ```
 
-Before applying registry files, review them and replace the placeholder executable and icon paths with the expanded absolute paths for your account, for example:
+Register the file and directory context menus:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer install
+```
+
+By default, Explorer imports are processed immediately with `import --process "%1"`. Use `--queue-only` if right-click imports should only enqueue work for a later `kbintake agent` run.
+
+Verify the registered commands:
+
+```powershell
+reg query "HKCU\Software\Classes\*\shell\KBIntake\command"
+reg query "HKCU\Software\Classes\Directory\shell\KBIntake\command"
+reg query "HKCU\Software\Classes\*\shell\KBIntake" /v Icon
+reg query "HKCU\Software\Classes\Directory\shell\KBIntake" /v Icon
+```
+
+Roll back the context-menu entries:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer uninstall
+```
+
+The `.reg` files remain available as reviewable fallback artifacts. Before applying them manually, review them and replace the placeholder executable and icon paths with the expanded absolute paths for your account, for example:
 
 ```text
 C:\Users\<user>\AppData\Local\Programs\kbintake\kbintake.exe
@@ -149,23 +174,14 @@ HKEY_CURRENT_USER\Software\Classes\*\shell\KBIntake
 HKEY_CURRENT_USER\Software\Classes\Directory\shell\KBIntake
 ```
 
-Register the file and directory context menus:
+Manual registration fallback:
 
 ```powershell
 reg import .\kbintake\scripts\register_file_context_menu.reg
 reg import .\kbintake\scripts\register_dir_context_menu.reg
 ```
 
-Verify the registered commands:
-
-```powershell
-reg query "HKCU\Software\Classes\*\shell\KBIntake\command"
-reg query "HKCU\Software\Classes\Directory\shell\KBIntake\command"
-reg query "HKCU\Software\Classes\*\shell\KBIntake" /v Icon
-reg query "HKCU\Software\Classes\Directory\shell\KBIntake" /v Icon
-```
-
-Roll back the context-menu entries:
+Manual rollback fallback:
 
 ```powershell
 reg import .\kbintake\scripts\unregister_file_context_menu.reg

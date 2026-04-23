@@ -41,6 +41,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: ConfigCommands,
     },
+    Explorer {
+        #[command(subcommand)]
+        command: ExplorerCommands,
+    },
     Doctor,
     ConfigShow,
 }
@@ -68,6 +72,27 @@ pub enum TargetCommands {
     Show { target: String },
     Add { name: String, path: PathBuf },
     SetDefault { target: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ExplorerCommands {
+    #[command(about = "Register Windows Explorer right-click menu entries")]
+    Install {
+        #[arg(
+            long,
+            help = "Executable path to register; defaults to the current exe"
+        )]
+        exe_path: Option<PathBuf>,
+        #[arg(
+            long,
+            help = "Icon path to register; defaults to kbintake.ico next to the exe"
+        )]
+        icon_path: Option<PathBuf>,
+        #[arg(long, help = "Queue right-click imports without immediate processing")]
+        queue_only: bool,
+    },
+    #[command(about = "Remove Windows Explorer right-click menu entries")]
+    Uninstall,
 }
 
 #[derive(Debug, Clone)]
@@ -316,6 +341,43 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             config.save()?;
             println!("Default target: {}", target.target_id);
             println!("Path: {}", target.root_path.display());
+            Ok(())
+        }
+    }
+}
+
+pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
+    match command {
+        ExplorerCommands::Install {
+            exe_path,
+            icon_path,
+            queue_only,
+        } => {
+            let mut options = crate::explorer::default_install_options(queue_only)?;
+            if let Some(exe_path) = exe_path {
+                options.exe_path = exe_path;
+                if icon_path.is_none() {
+                    options.icon_path =
+                        crate::explorer::discover_icon_next_to_exe(&options.exe_path);
+                }
+            }
+            if icon_path.is_some() {
+                options.icon_path = icon_path;
+            }
+
+            let registrations = crate::explorer::install(&options)?;
+            for registration in registrations {
+                println!("Registered: HKCU\\{}", registration.menu_key);
+                println!("Command: {}", registration.command);
+                if let Some(icon_path) = registration.icon_path {
+                    println!("Icon: {}", icon_path.display());
+                }
+            }
+            Ok(())
+        }
+        ExplorerCommands::Uninstall => {
+            crate::explorer::uninstall()?;
+            println!("Removed Explorer context-menu entries");
             Ok(())
         }
     }

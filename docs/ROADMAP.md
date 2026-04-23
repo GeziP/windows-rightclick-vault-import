@@ -71,6 +71,9 @@ Goal: expose the import command through file and directory right-click menus.
 - Issue I15: Add installer guidance
   - Document how to build the exe, place it, and apply/remove registry entries.
   - Acceptance: README includes registration, unregistration, and safety notes.
+- Issue I19: Add Explorer install command
+  - Register and unregister per-user file and directory context menus from the CLI.
+  - Acceptance: `kbintake explorer install` writes HKCU menu, command, and icon values; `kbintake explorer uninstall` removes them.
 
 ## Epic E6: Quality, Release, and Hardening
 
@@ -102,7 +105,7 @@ Goal: make the MVP testable, diagnosable, and safe for local use.
 - The CLI import and one-shot agent path has focused unit coverage for scanning, queue state, deterministic copy conflicts, duplicate detection, invalid sources, and partial-import rejection.
 - Integration tests cover config bootstrap, idempotent schema initialization, import enqueue, successful agent drain, and duplicate handling.
 - CI workflow coverage is defined for Windows with formatting, clippy, build, and test gates.
-- Explorer registration now includes unregister scripts plus README install, registration, verification, and rollback guidance.
+- Explorer registration now includes a first-party `kbintake explorer install/uninstall` command, icon support, unregister scripts, and README verification guidance.
 - v0.1 release validation is tracked in `docs/RELEASE_CHECKLIST.md`.
 - Target configuration can be updated from the CLI with `kbintake config set-target`, and `doctor` validates schema plus target writability.
 - Multiple targets can be added/listed from the CLI, and imports can explicitly select a target with `--target`.

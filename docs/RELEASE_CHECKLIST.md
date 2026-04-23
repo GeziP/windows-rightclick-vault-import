@@ -57,38 +57,32 @@ Install the release executable to a stable per-user path:
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
 Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
+Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor
 ```
 
-Before importing registry scripts:
-
-- Review `kbintake/scripts/register_file_context_menu.reg`.
-- Review `kbintake/scripts/register_dir_context_menu.reg`.
-- Replace the placeholder executable path with the expanded absolute install path.
-- Confirm the scripts only write under `HKEY_CURRENT_USER\Software\Classes`.
-
-Apply and verify:
+Register and verify:
 
 ```powershell
-reg import .\kbintake\scripts\register_file_context_menu.reg
-reg import .\kbintake\scripts\register_dir_context_menu.reg
+& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer install
 reg query "HKCU\Software\Classes\*\shell\KBIntake\command"
 reg query "HKCU\Software\Classes\Directory\shell\KBIntake\command"
+reg query "HKCU\Software\Classes\*\shell\KBIntake" /v Icon
+reg query "HKCU\Software\Classes\Directory\shell\KBIntake" /v Icon
 ```
 
 Manual Explorer smoke test:
 
 - Right-click a regular file and choose the KBIntake action.
 - Right-click a directory and choose the KBIntake action.
-- Run `kbintake.exe jobs list` and `kbintake.exe agent` to confirm queued imports are visible and processable.
+- Run `kbintake.exe jobs list` to confirm the right-click imports completed or queued as expected.
 
 ## Rollback
 
 Remove context-menu entries:
 
 ```powershell
-reg import .\kbintake\scripts\unregister_file_context_menu.reg
-reg import .\kbintake\scripts\unregister_dir_context_menu.reg
+& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer uninstall
 ```
 
 Verify the keys are gone:
@@ -109,7 +103,7 @@ Local runtime state is stored under `%LOCALAPPDATA%\kbintake` by default. Do not
 ## Known Limitations
 
 - The agent is a one-shot queue drain command, not a long-running Windows service.
-- Registry scripts use editable placeholders and are not generated automatically.
+- Registry scripts still use editable placeholders when used manually; prefer `kbintake explorer install`.
 - Only a local-folder target is implemented.
 - There is no schema migration version table yet; schema changes are currently additive and idempotent.
 - Explorer validation is manual.
