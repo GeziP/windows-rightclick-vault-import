@@ -882,6 +882,51 @@ fn cli_vault_stats_json_multiple_targets() {
     assert_eq!(archive["failed_count"], 0);
 }
 
+#[test]
+fn cli_vault_stats_json_target_filter_returns_single_row() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let default_source = temp.path().join("default.md");
+    let archive_source = temp.path().join("archive.md");
+    let archive_path = temp.path().join("archive");
+    fs::create_dir(&archive_path).unwrap();
+    fs::write(&default_source, "hello default").unwrap();
+    fs::write(&archive_source, "hello archive").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "add", "archive"])
+        .arg(&archive_path)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&default_source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--target", "archive", "--process"])
+        .arg(&archive_source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["vault", "stats", "--target", "archive", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let rows = value.as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["target_id"], "archive");
+    assert_eq!(rows[0]["files_imported"], 1);
+}
+
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {
     conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = ?1 AND name = ?2",

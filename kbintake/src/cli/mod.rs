@@ -140,6 +140,8 @@ pub enum TargetCommands {
 pub enum VaultCommands {
     #[command(about = "Show per-target vault import stats")]
     Stats {
+        #[arg(long, help = "Show stats for a single target ID or name")]
+        target: Option<String>,
         #[arg(long, help = "Output stats as JSON")]
         json: bool,
     },
@@ -778,21 +780,26 @@ struct VaultStatsRow {
 
 pub fn handle_vault(app: &App, command: VaultCommands) -> Result<()> {
     match command {
-        VaultCommands::Stats { json } => handle_vault_stats(app, json),
+        VaultCommands::Stats { target, json } => handle_vault_stats(app, target, json),
     }
 }
 
-fn handle_vault_stats(app: &App, json: bool) -> Result<()> {
+fn handle_vault_stats(app: &App, target_filter: Option<String>, json: bool) -> Result<()> {
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
     let mut rows = Vec::new();
-    for (index, target) in app
-        .config
-        .targets
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| t.is_active())
-    {
+    let targets = if let Some(target_filter) = target_filter {
+        let target = app.config.target_any_by_id(&target_filter)?;
+        vec![target.clone()]
+    } else {
+        app.config
+            .targets
+            .iter()
+            .filter(|t| t.is_active())
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    for target in targets {
         let stats = repo.target_stats(&target.target_id)?;
         let processed = stats.success_count + stats.duplicate_count;
         let duplicate_percent = if processed == 0 {
@@ -804,7 +811,11 @@ fn handle_vault_stats(app: &App, json: bool) -> Result<()> {
             target_id: target.target_id.clone(),
             name: target.name.clone(),
             root_path: target.root_path.display().to_string(),
-            is_default: index == 0,
+            is_default: app
+                .config
+                .targets
+                .first()
+                .is_some_and(|t| t.target_id == target.target_id),
             files_imported: stats.imported_files,
             storage_bytes: stats.storage_bytes,
             duplicate_count: stats.duplicate_count,
