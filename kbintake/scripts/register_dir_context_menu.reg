@@ -2,6 +2,7 @@ Windows Registry Editor Version 5.00
 
 [HKEY_CURRENT_USER\Software\Classes\Directory\shell\KBIntake]
 @="Add Folder to Knowledge Base"
+"Icon"="C:\\Path\\To\\kbintake.ico"
 
 [HKEY_CURRENT_USER\Software\Classes\Directory\shell\KBIntake\command]
 @="\"C:\\Path\\To\\kbintake.exe\" import \"%1\""

@@ -55,6 +55,7 @@ For a stable per-user install path:
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
 Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
+Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor
 ```
 
@@ -130,13 +131,15 @@ cd kbintake
 cargo build --release
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
 Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
+Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor
 ```
 
-Before applying registry files, review them and replace the placeholder executable path with the expanded absolute path for your account, for example:
+Before applying registry files, review them and replace the placeholder executable and icon paths with the expanded absolute paths for your account, for example:
 
 ```text
 C:\Users\<user>\AppData\Local\Programs\kbintake\kbintake.exe
+C:\Users\<user>\AppData\Local\Programs\kbintake\kbintake.ico
 ```
 
 The registration scripts should only modify these per-user keys:
@@ -158,6 +161,8 @@ Verify the registered commands:
 ```powershell
 reg query "HKCU\Software\Classes\*\shell\KBIntake\command"
 reg query "HKCU\Software\Classes\Directory\shell\KBIntake\command"
+reg query "HKCU\Software\Classes\*\shell\KBIntake" /v Icon
+reg query "HKCU\Software\Classes\Directory\shell\KBIntake" /v Icon
 ```
 
 Roll back the context-menu entries:

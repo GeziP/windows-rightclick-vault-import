@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="KBIntake icon">
+  <defs>
+    <linearGradient id="vault" x1="40" y1="34" x2="216" y2="222" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1fb6a6"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="92" y1="52" x2="164" y2="150" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#dbeafe"/>
+    </linearGradient>
+  </defs>
+  <rect x="28" y="44" width="200" height="168" rx="34" fill="url(#vault)"/>
+  <path d="M66 94h124v72c0 12-10 22-22 22H88c-12 0-22-10-22-22V94Z" fill="#0f172a" opacity=".18"/>
+  <path d="M77 82c0-11 9-20 20-20h48l34 34v72c0 11-9 20-20 20H97c-11 0-20-9-20-20V82Z" fill="url(#paper)"/>
+  <path d="M145 62v29c0 8 6 14 14 14h20" fill="#bfdbfe"/>
+  <path d="M96 124h64M96 146h48" stroke="#2563eb" stroke-width="14" stroke-linecap="round"/>
+  <path d="M118 190V142h-25l35-37 35 37h-25v48h-20Z" fill="#22c55e"/>
+  <path d="M118 190V142h-25l35-37 35 37h-25v48h-20Z" fill="none" stroke="#f8fafc" stroke-width="8" stroke-linejoin="round"/>
+  <path d="M118 190V142h-25l35-37 35 37h-25v48h-20Z" fill="#22c55e"/>
+</svg>
