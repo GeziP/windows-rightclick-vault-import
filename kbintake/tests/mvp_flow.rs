@@ -2,7 +2,7 @@ use std::fs;
 
 use kbintake::agent::scheduler::drain_queue;
 use kbintake::app::App;
-use kbintake::cli::handle_import;
+use kbintake::cli::{handle_import, handle_targets, TargetCommands};
 use kbintake::queue::repository::Repository;
 use kbintake::queue::state_machine;
 use rusqlite::{params, Connection};
@@ -79,7 +79,7 @@ fn import_enqueue_creates_batch_and_items() {
     fs::write(&root_file, "root").unwrap();
     fs::write(&nested_file, "child").unwrap();
 
-    handle_import(&app, vec![root_file, nested_dir]).unwrap();
+    handle_import(&app, None, vec![root_file, nested_dir]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -109,7 +109,7 @@ fn agent_processes_queued_import_successfully() {
     let source = temp.path().join("note.md");
     fs::write(&source, "hello").unwrap();
 
-    handle_import(&app, vec![source]).unwrap();
+    handle_import(&app, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -135,7 +135,7 @@ fn agent_marks_duplicate_without_second_copy() {
     fs::write(&first, "same").unwrap();
     fs::write(&second, "same").unwrap();
 
-    handle_import(&app, vec![first, second]).unwrap();
+    handle_import(&app, None, vec![first, second]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -151,6 +151,48 @@ fn agent_marks_duplicate_without_second_copy() {
     assert_eq!(items[1].status, state_machine::STATUS_DUPLICATE);
     assert!(items[1].duplicate_of.is_some());
     assert_eq!(copied_count, 1);
+}
+
+#[test]
+fn explicit_import_target_processes_into_selected_vault() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    handle_targets(
+        &app,
+        TargetCommands::Add {
+            name: "archive".to_string(),
+            path: temp.path().join("archive-vault"),
+        },
+    )
+    .unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("archive-note.md");
+    fs::write(&source, "hello archive").unwrap();
+
+    handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(10).unwrap().pop().unwrap();
+    let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+
+    assert_eq!(batch.target_id, "archive");
+    assert_eq!(items[0].status, state_machine::STATUS_SUCCESS);
+    assert!(temp
+        .path()
+        .join("archive-vault")
+        .join("archive-note.md")
+        .exists());
+    assert!(!app
+        .config
+        .targets
+        .iter()
+        .find(|target| target.target_id == "default")
+        .unwrap()
+        .root_path
+        .join("archive-note.md")
+        .exists());
 }
 
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {

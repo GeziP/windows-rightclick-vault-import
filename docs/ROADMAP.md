@@ -105,3 +105,4 @@ Goal: make the MVP testable, diagnosable, and safe for local use.
 - Explorer registration now includes unregister scripts plus README install, registration, verification, and rollback guidance.
 - v0.1 release validation is tracked in `docs/RELEASE_CHECKLIST.md`.
 - Target configuration can be updated from the CLI with `kbintake config set-target`, and `doctor` validates schema plus target writability.
+- Multiple targets can be added/listed from the CLI, and imports can explicitly select a target with `--target`.

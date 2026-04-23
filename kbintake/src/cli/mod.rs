@@ -22,11 +22,17 @@ pub struct Cli {
 pub enum Commands {
     Agent,
     Import {
+        #[arg(long)]
+        target: Option<String>,
         paths: Vec<PathBuf>,
     },
     Jobs {
         #[command(subcommand)]
         command: JobCommands,
+    },
+    Targets {
+        #[command(subcommand)]
+        command: TargetCommands,
     },
     Config {
         #[command(subcommand)]
@@ -52,12 +58,23 @@ pub enum ConfigCommands {
     },
 }
 
-pub fn handle_import(app: &App, paths: Vec<PathBuf>) -> Result<()> {
+#[derive(Subcommand, Debug)]
+pub enum TargetCommands {
+    List,
+    Show { target: String },
+    Add { name: String, path: PathBuf },
+    SetDefault { target: String },
+}
+
+pub fn handle_import(app: &App, target_id: Option<String>, paths: Vec<PathBuf>) -> Result<()> {
     if paths.is_empty() {
         anyhow::bail!("no input paths provided");
     }
 
-    let target = app.config.default_target()?;
+    let target = match target_id {
+        Some(target_id) => app.config.target_by_id(&target_id)?,
+        None => app.config.default_target()?,
+    };
     let mut files = Vec::new();
     for path in paths {
         let discovered = scanner::expand_input_path(&path)
@@ -176,13 +193,57 @@ pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
     }
 }
 
+pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
+    match command {
+        TargetCommands::List => {
+            for (index, target) in app.config.targets.iter().enumerate() {
+                let marker = if index == 0 { "*" } else { " " };
+                println!(
+                    "{marker} {}  {}  {}",
+                    target.target_id,
+                    target.name,
+                    target.root_path.display()
+                );
+            }
+            Ok(())
+        }
+        TargetCommands::Show { target } => {
+            let target = app.config.target_by_id(&target)?;
+            println!("Target: {}", target.target_id);
+            println!("Name: {}", target.name);
+            println!("Path: {}", target.root_path.display());
+            Ok(())
+        }
+        TargetCommands::Add { name, path } => {
+            let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
+            let target = config.add_target(name, path)?;
+            config::validate_target_root(&target.root_path)?;
+            config.save()?;
+            println!("Added target: {}", target.target_id);
+            println!("Path: {}", target.root_path.display());
+            Ok(())
+        }
+        TargetCommands::SetDefault { target } => {
+            let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
+            let target = config.set_default_target_by_id(&target)?;
+            config.save()?;
+            println!("Default target: {}", target.target_id);
+            println!("Path: {}", target.root_path.display());
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use rusqlite::Connection;
 
-    use super::{format_item_line, handle_config, handle_import, ConfigCommands};
+    use super::{
+        format_item_line, handle_config, handle_import, handle_targets, ConfigCommands,
+        TargetCommands,
+    };
     use crate::app::App;
     use crate::config::{AppConfig, ImportConfig};
     use crate::db;
@@ -217,7 +278,7 @@ mod tests {
         let missing = temp.path().join("missing.md");
         fs::write(&valid, "hello").unwrap();
 
-        let err = handle_import(&app, vec![valid, missing]).unwrap_err();
+        let err = handle_import(&app, None, vec![valid, missing]).unwrap_err();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -232,7 +293,7 @@ mod tests {
         let empty_dir = temp.path().join("empty");
         fs::create_dir(&empty_dir).unwrap();
 
-        let err = handle_import(&app, vec![empty_dir]).unwrap_err();
+        let err = handle_import(&app, None, vec![empty_dir]).unwrap_err();
 
         assert!(err.to_string().contains("no importable files found"));
     }
@@ -275,7 +336,7 @@ mod tests {
         .unwrap();
         let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
 
-        handle_import(&reloaded, vec![source]).unwrap();
+        handle_import(&reloaded, None, vec![source]).unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -283,6 +344,95 @@ mod tests {
         let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
         assert_eq!(batch.target_id, "archive");
         assert_eq!(items[0].target_id, "archive");
+    }
+
+    #[test]
+    fn targets_add_persists_additional_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        let target_root = temp.path().join("archive");
+
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: target_root.clone(),
+            },
+        )
+        .unwrap();
+
+        let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        assert_eq!(reloaded.config.targets.len(), 2);
+        assert_eq!(reloaded.config.targets[0].target_id, "default");
+        assert_eq!(reloaded.config.targets[1].target_id, "archive");
+        assert_eq!(reloaded.config.targets[1].root_path, target_root);
+    }
+
+    #[test]
+    fn targets_set_default_changes_default_import_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: temp.path().join("archive"),
+            },
+        )
+        .unwrap();
+        let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+
+        handle_targets(
+            &app,
+            TargetCommands::SetDefault {
+                target: "archive".to_string(),
+            },
+        )
+        .unwrap();
+
+        let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        assert_eq!(reloaded.config.targets[0].target_id, "archive");
+    }
+
+    #[test]
+    fn import_with_explicit_target_queues_for_that_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        handle_targets(
+            &app,
+            TargetCommands::Add {
+                name: "archive".to_string(),
+                path: temp.path().join("archive"),
+            },
+        )
+        .unwrap();
+        let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+        let source = temp.path().join("note.md");
+        fs::write(&source, "hello").unwrap();
+
+        handle_import(&reloaded, Some("archive".to_string()), vec![source]).unwrap();
+
+        let conn = reloaded.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let batch = repo.list_batches(1).unwrap().pop().unwrap();
+        let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+        assert_eq!(batch.target_id, "archive");
+        assert_eq!(items[0].target_id, "archive");
+    }
+
+    #[test]
+    fn import_with_unknown_target_fails_before_creating_batch() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+        let source = temp.path().join("note.md");
+        fs::write(&source, "hello").unwrap();
+
+        let err = handle_import(&app, Some("missing".to_string()), vec![source]).unwrap_err();
+
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        assert!(err.to_string().contains("target not configured"));
+        assert!(repo.list_batches(20).unwrap().is_empty());
     }
 
     #[test]

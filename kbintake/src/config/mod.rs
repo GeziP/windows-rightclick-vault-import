@@ -66,6 +66,32 @@ impl AppConfig {
             .with_context(|| format!("target not configured: {target_id}"))
     }
 
+    pub fn add_target(&mut self, name: impl Into<String>, root_path: PathBuf) -> Result<Target> {
+        let name = validate_target_name(name.into())?;
+        if self
+            .targets
+            .iter()
+            .any(|target| target.target_id == name || target.name == name)
+        {
+            bail!("target already configured: {name}");
+        }
+
+        let target = Target::new(name, root_path);
+        self.targets.push(target.clone());
+        Ok(target)
+    }
+
+    pub fn set_default_target_by_id(&mut self, target_id: &str) -> Result<Target> {
+        let index = self
+            .targets
+            .iter()
+            .position(|target| target.target_id == target_id || target.name == target_id)
+            .with_context(|| format!("target not configured: {target_id}"))?;
+        let target = self.targets.remove(index);
+        self.targets.insert(0, target.clone());
+        Ok(target)
+    }
+
     pub fn config_path(&self) -> PathBuf {
         self.app_data_dir.join("config.toml")
     }
@@ -85,9 +111,7 @@ impl AppConfig {
         root_path: PathBuf,
     ) -> Result<Target> {
         let name = name.into();
-        if name.trim().is_empty() {
-            bail!("target name cannot be empty");
-        }
+        let name = validate_target_name(name)?;
 
         let target = Target::new(name, root_path);
         if self.targets.is_empty() {
@@ -97,6 +121,20 @@ impl AppConfig {
         }
         Ok(target)
     }
+}
+
+fn validate_target_name(name: String) -> Result<String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        bail!("target name cannot be empty");
+    }
+    if !name
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        bail!("target name may only contain letters, numbers, '-' and '_'");
+    }
+    Ok(name)
 }
 
 pub fn validate_target_root(root_path: &std::path::Path) -> Result<()> {
@@ -168,6 +206,48 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("target not configured"));
+    }
+
+    #[test]
+    fn add_target_rejects_duplicates() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        let err = config
+            .add_target("archive", temp.path().join("other"))
+            .unwrap_err();
+
+        assert!(err.to_string().contains("target already configured"));
+    }
+
+    #[test]
+    fn set_default_target_by_id_reorders_targets() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+
+        let target = config.set_default_target_by_id("archive").unwrap();
+
+        assert_eq!(target.target_id, "archive");
+        assert_eq!(config.targets[0].target_id, "archive");
+        assert_eq!(config.targets[1].target_id, "default");
+    }
+
+    #[test]
+    fn target_name_allows_cli_friendly_characters_only() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+
+        let err = config
+            .add_target("bad target", temp.path().join("bad"))
+            .unwrap_err();
+
+        assert!(err.to_string().contains("may only contain"));
     }
 
     #[test]

@@ -14,6 +14,9 @@ cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo run -- doctor
 cargo run -- config show
 cargo run -- config set-target <vault-path>
+cargo run -- targets add archive <vault-path>
+cargo run -- targets list
+cargo run -- import --target archive <path>
 cargo run -- import <path>
 cargo run -- agent
 cargo run -- jobs list
