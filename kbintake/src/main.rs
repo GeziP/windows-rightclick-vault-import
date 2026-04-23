@@ -19,9 +19,11 @@ fn main() -> ExitCode {
         Commands::Import {
             target,
             process,
+            dry_run,
+            json,
             paths,
         } => app::App::bootstrap()
-            .and_then(|app| cli::handle_import_command(&app, target, process, paths))
+            .and_then(|app| cli::handle_import_command(&app, target, process, dry_run, json, paths))
             .map_err(|err| (CommandKind::Import, err)),
         Commands::Jobs { command } => {
             let kind = CommandKind::Jobs(command_kind(&command));

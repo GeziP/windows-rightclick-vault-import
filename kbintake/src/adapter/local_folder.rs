@@ -20,6 +20,10 @@ impl LocalFolderAdapter {
         copier::copy_to_path(source, &destination)
     }
 
+    pub fn preview_destination(&self, source_name: &str) -> PathBuf {
+        self.available_destination(source_name)
+    }
+
     fn available_destination(&self, source_name: &str) -> PathBuf {
         let candidate = self.root_path.join(source_name);
         if !candidate.exists() {
@@ -89,5 +93,21 @@ mod tests {
             "existing"
         );
         assert_eq!(fs::read_to_string(stored).unwrap(), "new");
+    }
+
+    #[test]
+    fn previews_destination_without_copying() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("vault");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("note.txt"), "existing").unwrap();
+
+        let adapter = LocalFolderAdapter::new(&target);
+
+        assert_eq!(
+            adapter.preview_destination("note.txt"),
+            target.join("note-1.txt")
+        );
+        assert!(!target.join("note-1.txt").exists());
     }
 }

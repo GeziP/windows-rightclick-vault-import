@@ -223,7 +223,7 @@ fn import_process_drains_new_work_end_to_end() {
     let source = temp.path().join("process-note.md");
     fs::write(&source, "process me").unwrap();
 
-    handle_import_command(&app, None, true, vec![source]).unwrap();
+    handle_import_command(&app, None, true, false, false, vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -250,7 +250,7 @@ fn import_without_process_leaves_work_queued() {
     let source = temp.path().join("queued-note.md");
     fs::write(&source, "queue me").unwrap();
 
-    handle_import_command(&app, None, false, vec![source]).unwrap();
+    handle_import_command(&app, None, false, false, false, vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -270,7 +270,7 @@ fn import_process_failure_before_enqueue_does_not_drain_existing_queue() {
     fs::write(&existing, "still queued").unwrap();
     handle_import(&app, None, vec![existing]).unwrap();
 
-    let err = handle_import_command(&app, None, true, vec![missing]).unwrap_err();
+    let err = handle_import_command(&app, None, true, false, false, vec![missing]).unwrap_err();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -436,6 +436,55 @@ fn cli_returns_database_error_when_sqlite_file_cannot_be_opened() {
         Some(kbintake::exit_codes::DATABASE_ERROR)
     );
     assert!(String::from_utf8_lossy(&output.stderr).contains("ERROR [8]:"));
+}
+
+#[test]
+fn cli_import_dry_run_prints_preview_without_creating_batch() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("preview.md");
+    fs::write(&source, "preview").unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["import", "--dry-run"])
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Source Path"));
+    assert!(stdout.contains("Destination"));
+    assert!(stdout.contains("copy"));
+
+    let app = App::bootstrap_in(app_data_dir).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    assert!(repo.list_batches(10).unwrap().is_empty());
+    assert!(!app.config.targets[0].root_path.join("preview.md").exists());
+}
+
+#[test]
+fn cli_import_dry_run_json_outputs_preview_array() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let source = temp.path().join("preview.md");
+    fs::write(&source, "preview").unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["import", "--dry-run", "--json"])
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value[0]["action"], "copy");
+    assert_eq!(value[0]["source"], source.display().to_string());
+    assert!(value[0]["destination"]
+        .as_str()
+        .unwrap()
+        .ends_with("preview.md"));
 }
 
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {

@@ -7,6 +7,7 @@ The current release is a local MVP: it scans files, queues import jobs in SQLite
 ## Features
 
 - Import one or more files or folders from the terminal.
+- Preview imports without writing files or queue rows with `import --dry-run`.
 - Recursively scan directories without following symlinks.
 - Queue imports in a local SQLite database.
 - Process queued work with `agent` or immediately with `import --process`.
@@ -77,6 +78,13 @@ Import and process in one command:
 cargo run -- import --process C:\path\to\note.md
 ```
 
+Preview an import without writing to the vault or queue:
+
+```powershell
+cargo run -- import --dry-run C:\path\to\note.md
+cargo run -- import --dry-run --json C:\path\to\note.md
+```
+
 Add and use another target:
 
 ```powershell
@@ -115,7 +123,7 @@ kbintake targets remove <target>
 kbintake targets set-default <target>
 kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only]
 kbintake explorer uninstall
-kbintake import [--target <target>] [--process] <path...>
+kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
 kbintake agent
 kbintake jobs list
 kbintake jobs show <batch-id>

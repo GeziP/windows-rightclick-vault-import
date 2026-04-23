@@ -28,6 +28,10 @@ pub enum Commands {
         target: Option<String>,
         #[arg(long)]
         process: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
         paths: Vec<PathBuf>,
     },
     Jobs {
@@ -134,8 +138,20 @@ pub fn handle_import_command(
     app: &App,
     target_id: Option<String>,
     process: bool,
+    dry_run: bool,
+    json: bool,
     paths: Vec<PathBuf>,
 ) -> Result<i32> {
+    if dry_run {
+        let rows = crate::processor::dry_run::preview_import(app, target_id, paths)?;
+        if json {
+            println!("{}", serde_json::to_string_pretty(&rows)?);
+        } else {
+            crate::processor::dry_run::print_table(&rows);
+        }
+        return Ok(exit_codes::SUCCESS);
+    }
+
     let outcome = handle_import(app, target_id, paths)?;
     if process {
         scheduler::drain_queue(app)?;
@@ -737,7 +753,8 @@ mod tests {
         fs::write(&empty, "").unwrap();
         fs::write(&large, "too large").unwrap();
 
-        let code = handle_import_command(&app, None, true, vec![empty, large]).unwrap();
+        let code =
+            handle_import_command(&app, None, true, false, false, vec![empty, large]).unwrap();
 
         assert_eq!(code, exit_codes::PARTIAL_SUCCESS);
     }
@@ -750,7 +767,7 @@ mod tests {
         let large = temp.path().join("large.md");
         fs::write(&large, "too large").unwrap();
 
-        let code = handle_import_command(&app, None, true, vec![large]).unwrap();
+        let code = handle_import_command(&app, None, true, false, false, vec![large]).unwrap();
 
         assert_eq!(code, exit_codes::FILE_SIZE_EXCEEDED);
     }
