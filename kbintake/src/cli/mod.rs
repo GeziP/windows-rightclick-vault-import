@@ -49,6 +49,7 @@ pub enum Commands {
 pub enum JobCommands {
     List,
     Show { batch_id: String },
+    Retry { batch_id: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -181,6 +182,26 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<()> {
             for item in repo.list_items_by_batch(&batch_id)? {
                 print_events(&repo, "item", &item.item_id)?;
             }
+        }
+        JobCommands::Retry { batch_id } => {
+            let failed_items = repo
+                .list_items_by_batch(&batch_id)?
+                .into_iter()
+                .filter(|item| item.status == crate::queue::state_machine::STATUS_FAILED)
+                .collect::<Vec<_>>();
+            let retried = repo.retry_failed_items_by_batch(&batch_id)?;
+            for item in failed_items {
+                repo.insert_event(&DomainEvent::new(
+                    "item",
+                    item.item_id,
+                    "item.retry_queued",
+                    serde_json::json!({
+                        "batch_id": batch_id,
+                        "status": "queued"
+                    }),
+                ))?;
+            }
+            println!("Retried items: {retried}");
         }
     }
     Ok(())

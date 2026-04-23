@@ -107,3 +107,4 @@ Goal: make the MVP testable, diagnosable, and safe for local use.
 - Target configuration can be updated from the CLI with `kbintake config set-target`, and `doctor` validates schema plus target writability.
 - Multiple targets can be added/listed from the CLI, and imports can explicitly select a target with `--target`.
 - Imports can optionally process immediately with `kbintake import --process`.
+- Failed batch items can be requeued with `kbintake jobs retry <batch-id>`.

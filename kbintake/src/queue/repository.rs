@@ -205,6 +205,23 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
+    pub fn retry_failed_items_by_batch(&self, batch_id: &str) -> Result<usize> {
+        self.get_batch(batch_id)?;
+        let rows = self.conn.execute(
+            "UPDATE items
+             SET status = ?1, stage = NULL, error_code = NULL, error_message = NULL, updated_at = ?2
+             WHERE batch_id = ?3 AND status = ?4",
+            params![
+                state_machine::STATUS_QUEUED,
+                Utc::now().to_rfc3339(),
+                batch_id,
+                state_machine::STATUS_FAILED
+            ],
+        )?;
+        self.refresh_batch_status(batch_id)?;
+        Ok(rows)
+    }
+
     pub fn insert_manifest(&self, record: &ManifestRecord) -> Result<()> {
         self.conn.execute(
             "INSERT INTO manifest_records (
@@ -466,6 +483,46 @@ mod tests {
             repo.find_manifest_by_hash("default", "abc123").unwrap(),
             Some(record_id)
         );
+    }
+
+    #[test]
+    fn retry_failed_items_by_batch_resets_only_failed_items() {
+        let (conn, batch, item) = repo_with_conn();
+        let repo = Repository::new(&conn);
+        let second = ItemJob::new(
+            batch.batch_id.clone(),
+            batch.target_id.clone(),
+            PathBuf::from("other.md"),
+        );
+        repo.insert_item(&second).unwrap();
+        repo.mark_item_failed(&item.item_id, "E_TEST", "failed")
+            .unwrap();
+        repo.mark_item_success(&second.item_id, "vault/other.md")
+            .unwrap();
+
+        let retried = repo.retry_failed_items_by_batch(&batch.batch_id).unwrap();
+
+        let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+        assert_eq!(retried, 1);
+        assert_eq!(items[0].status, state_machine::STATUS_QUEUED);
+        assert_eq!(items[0].error_code, None);
+        assert_eq!(items[0].error_message, None);
+        assert_eq!(items[1].status, state_machine::STATUS_SUCCESS);
+        assert_eq!(
+            repo.get_batch(&batch.batch_id).unwrap().status,
+            state_machine::STATUS_RUNNING
+        );
+    }
+
+    #[test]
+    fn retry_failed_items_by_batch_rejects_missing_batch() {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init_schema(&conn).unwrap();
+        let repo = Repository::new(&conn);
+
+        let err = repo.retry_failed_items_by_batch("missing").unwrap_err();
+
+        assert!(err.to_string().contains("Query returned no rows"));
     }
 
     #[test]

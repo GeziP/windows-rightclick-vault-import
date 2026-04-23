@@ -21,6 +21,7 @@ cargo run -- import --process <path>
 cargo run -- import <path>
 cargo run -- agent
 cargo run -- jobs list
+cargo run -- jobs retry <batch-id>
 ```
 
 Local runtime state is created under `%LOCALAPPDATA%\kbintake` by default:

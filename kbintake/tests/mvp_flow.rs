@@ -2,7 +2,9 @@ use std::fs;
 
 use kbintake::agent::scheduler::drain_queue;
 use kbintake::app::App;
-use kbintake::cli::{handle_import, handle_import_command, handle_targets, TargetCommands};
+use kbintake::cli::{
+    handle_import, handle_import_command, handle_jobs, handle_targets, JobCommands, TargetCommands,
+};
 use kbintake::queue::repository::Repository;
 use kbintake::queue::state_machine;
 use rusqlite::{params, Connection};
@@ -270,6 +272,55 @@ fn import_process_failure_before_enqueue_does_not_drain_existing_queue() {
     assert!(err.to_string().contains("failed to scan path"));
     assert_eq!(batch.status, state_machine::STATUS_QUEUED);
     assert_eq!(items[0].status, state_machine::STATUS_QUEUED);
+}
+
+#[test]
+fn jobs_retry_requeues_failed_items_for_successful_agent_drain() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let source = temp.path().join("retry-note.md");
+    fs::write(&source, "will disappear").unwrap();
+    handle_import(&app, None, vec![source.clone()]).unwrap();
+    fs::remove_file(&source).unwrap();
+    drain_queue(&app).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(10).unwrap().pop().unwrap();
+    let failed_item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(failed_item.status, state_machine::STATUS_FAILED);
+    drop(conn);
+
+    fs::write(&source, "now exists").unwrap();
+    handle_jobs(
+        &app,
+        JobCommands::Retry {
+            batch_id: batch.batch_id.clone(),
+        },
+    )
+    .unwrap();
+    drain_queue(&app).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.get_batch(&batch.batch_id).unwrap();
+    let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+
+    assert_eq!(batch.status, state_machine::STATUS_SUCCESS);
+    assert_eq!(items[0].status, state_machine::STATUS_SUCCESS);
+    assert_eq!(
+        event_types_for_entity(&conn, "item", &items[0].item_id),
+        vec![
+            "item.queued",
+            "item.failed",
+            "item.retry_queued",
+            "item.success"
+        ]
+    );
 }
 
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {
