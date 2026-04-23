@@ -1,0 +1,9 @@
+pub const SUCCESS: i32 = 0;
+pub const GENERAL_ERROR: i32 = 1;
+pub const INVALID_ARGUMENTS: i32 = 2;
+pub const FILE_SIZE_EXCEEDED: i32 = 3;
+pub const TARGET_NOT_FOUND: i32 = 4;
+pub const OPERATION_REJECTED: i32 = 5;
+pub const PARTIAL_SUCCESS: i32 = 6;
+pub const DUPLICATE_DETECTED: i32 = 7;
+pub const DATABASE_ERROR: i32 = 8;

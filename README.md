@@ -132,6 +132,26 @@ Local runtime state is created under `%LOCALAPPDATA%\kbintake` by default:
 
 Do not delete this directory unless you intentionally want to remove local config, queue state, manifests, and the default vault.
 
+For isolated testing, set `KBINTAKE_APP_DATA_DIR` to override the runtime state directory for one process.
+
+## Exit Codes
+
+KBIntake uses stable exit codes for scripting:
+
+```text
+0  success
+1  general error
+2  invalid arguments or validation failure
+3  all processed files exceeded max_file_size_mb
+4  target not found
+5  operation rejected
+6  partial success
+7  duplicate detected (reserved)
+8  database error
+```
+
+Errors are written to stderr as `ERROR [<code>]: <message>`. Normal command output is written to stdout.
+
 ## Windows Explorer Integration
 
 Build a release executable and copy it to a stable per-user path before registering context-menu entries:

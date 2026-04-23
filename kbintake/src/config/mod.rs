@@ -20,9 +20,13 @@ pub struct ImportConfig {
 
 impl AppConfig {
     pub fn load_or_init() -> Result<Self> {
-        let app_data_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("kbintake");
+        let app_data_dir = std::env::var_os("KBINTAKE_APP_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                dirs::data_local_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("kbintake")
+            });
         Self::load_or_init_in(app_data_dir)
     }
 

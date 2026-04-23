@@ -1,4 +1,5 @@
 use std::fs;
+use std::process::Command;
 
 use kbintake::agent::scheduler::drain_queue;
 use kbintake::app::App;
@@ -8,6 +9,12 @@ use kbintake::cli::{
 use kbintake::queue::repository::Repository;
 use kbintake::queue::state_machine;
 use rusqlite::{params, Connection};
+
+fn kbintake_command(app_data_dir: &std::path::Path) -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_kbintake"));
+    command.env("KBINTAKE_APP_DATA_DIR", app_data_dir);
+    command
+}
 
 fn bootstrap_temp_app(temp: &tempfile::TempDir) -> App {
     App::bootstrap_in(temp.path().join("appdata")).unwrap()
@@ -321,6 +328,114 @@ fn jobs_retry_requeues_failed_items_for_successful_agent_drain() {
             "item.success"
         ]
     );
+}
+
+#[test]
+fn cli_returns_target_not_found_exit_code_for_invalid_import_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("note.md");
+    fs::write(&source, "hello").unwrap();
+
+    let output = kbintake_command(&temp.path().join("appdata"))
+        .args(["import", "--target", "missing"])
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::TARGET_NOT_FOUND)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ERROR [4]:"));
+}
+
+#[test]
+fn cli_returns_file_size_exceeded_when_all_processed_items_exceed_limit() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    assert!(kbintake_command(&app_data_dir)
+        .arg("doctor")
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let config_path = app_data_dir.join("config.toml");
+    let config = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("max_file_size_mb = 512", "max_file_size_mb = 0");
+    fs::write(&config_path, config).unwrap();
+    let source = temp.path().join("large.md");
+    fs::write(&source, "too large").unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::FILE_SIZE_EXCEEDED)
+    );
+}
+
+#[test]
+fn cli_returns_partial_success_when_processed_batch_has_success_and_failure() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    assert!(kbintake_command(&app_data_dir)
+        .arg("doctor")
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let config_path = app_data_dir.join("config.toml");
+    let config = fs::read_to_string(&config_path)
+        .unwrap()
+        .replace("max_file_size_mb = 512", "max_file_size_mb = 0");
+    fs::write(&config_path, config).unwrap();
+    let empty = temp.path().join("empty.md");
+    let large = temp.path().join("large.md");
+    fs::write(&empty, "").unwrap();
+    fs::write(&large, "too large").unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&empty)
+        .arg(&large)
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::PARTIAL_SUCCESS)
+    );
+}
+
+#[test]
+fn cli_returns_database_error_when_sqlite_file_cannot_be_opened() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    assert!(kbintake_command(&app_data_dir)
+        .arg("doctor")
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let db_path = app_data_dir.join("data").join("kbintake.db");
+    fs::remove_file(&db_path).unwrap();
+    fs::create_dir(&db_path).unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "list"])
+        .output()
+        .unwrap();
+
+    assert_eq!(
+        output.status.code(),
+        Some(kbintake::exit_codes::DATABASE_ERROR)
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("ERROR [8]:"));
 }
 
 fn sqlite_object_count(conn: &Connection, kind: &str, name: &str) -> i64 {

@@ -5,6 +5,7 @@ pub mod cli;
 pub mod config;
 pub mod db;
 pub mod domain;
+pub mod exit_codes;
 pub mod explorer;
 pub mod logging;
 pub mod processor;

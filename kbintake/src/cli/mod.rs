@@ -8,6 +8,7 @@ use crate::agent::scheduler;
 use crate::app::App;
 use crate::config::{self, AppConfig};
 use crate::domain::{BatchJob, DomainEvent, ItemJob};
+use crate::exit_codes;
 use crate::processor::scanner;
 use crate::queue::repository::Repository;
 
@@ -134,12 +135,13 @@ pub fn handle_import_command(
     target_id: Option<String>,
     process: bool,
     paths: Vec<PathBuf>,
-) -> Result<()> {
-    handle_import(app, target_id, paths)?;
+) -> Result<i32> {
+    let outcome = handle_import(app, target_id, paths)?;
     if process {
         scheduler::drain_queue(app)?;
+        return import_exit_code(app, &outcome.batch_id);
     }
-    Ok(())
+    Ok(exit_codes::SUCCESS)
 }
 
 pub fn handle_import(
@@ -391,6 +393,34 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
     }
 }
 
+fn import_exit_code(app: &App, batch_id: &str) -> Result<i32> {
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+    let items = repo.list_items_by_batch(batch_id)?;
+    let failed_items = items
+        .iter()
+        .filter(|item| item.status == crate::queue::state_machine::STATUS_FAILED)
+        .collect::<Vec<_>>();
+
+    if failed_items.is_empty() {
+        return Ok(exit_codes::SUCCESS);
+    }
+
+    if failed_items.len() < items.len() {
+        return Ok(exit_codes::PARTIAL_SUCCESS);
+    }
+
+    if failed_items.iter().all(|item| {
+        item.error_message
+            .as_deref()
+            .is_some_and(|message| message.contains("exceeds max size"))
+    }) {
+        return Ok(exit_codes::FILE_SIZE_EXCEEDED);
+    }
+
+    Ok(exit_codes::GENERAL_ERROR)
+}
+
 pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
     match command {
         ExplorerCommands::Install {
@@ -435,13 +465,14 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        format_event_line, format_item_line, handle_config, handle_import, handle_targets,
-        ConfigCommands, TargetCommands,
+        format_event_line, format_item_line, handle_config, handle_import, handle_import_command,
+        handle_targets, ConfigCommands, TargetCommands,
     };
     use crate::app::App;
     use crate::config::{AppConfig, ImportConfig};
     use crate::db;
     use crate::domain::{DomainEvent, ItemJob, Target};
+    use crate::exit_codes;
     use crate::queue::repository::Repository;
 
     fn test_app(temp: &tempfile::TempDir) -> App {
@@ -694,6 +725,34 @@ mod tests {
         let repo = Repository::new(&conn);
         assert!(err.to_string().contains("target not configured"));
         assert!(repo.list_batches(20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn import_process_returns_partial_success_when_some_items_fail() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config.import.max_file_size_mb = 0;
+        let empty = temp.path().join("empty.md");
+        let large = temp.path().join("large.md");
+        fs::write(&empty, "").unwrap();
+        fs::write(&large, "too large").unwrap();
+
+        let code = handle_import_command(&app, None, true, vec![empty, large]).unwrap();
+
+        assert_eq!(code, exit_codes::PARTIAL_SUCCESS);
+    }
+
+    #[test]
+    fn import_process_returns_file_size_exceeded_when_all_items_exceed_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config.import.max_file_size_mb = 0;
+        let large = temp.path().join("large.md");
+        fs::write(&large, "too large").unwrap();
+
+        let code = handle_import_command(&app, None, true, vec![large]).unwrap();
+
+        assert_eq!(code, exit_codes::FILE_SIZE_EXCEEDED);
     }
 
     #[test]
