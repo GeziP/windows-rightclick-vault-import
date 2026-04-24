@@ -84,10 +84,20 @@ Copy it into a stable per-user location:
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
 Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
+Copy-Item .\target\release\kbintakew.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintakew.exe" -Force
 Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor --fix
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer install
 ```
+
+For repeatable development validation, use the scripts from the repository root:
+
+```powershell
+.\scripts\validate-explorer-toast.ps1
+.\scripts\validate-service-mode.ps1
+```
+
+The service validation script installs a Windows Service and must be run from an elevated Administrator PowerShell session.
 
 ## Uninstall
 

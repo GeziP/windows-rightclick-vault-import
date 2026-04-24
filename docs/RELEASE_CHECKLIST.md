@@ -25,6 +25,33 @@ cargo build --release --locked
 
 Record the command output or CI run link in the release notes.
 
+## Scripted Windows Smoke Checks
+
+Run the repeatable validation scripts from the repository root after the automated checks pass:
+
+```powershell
+.\scripts\validate-explorer-toast.ps1
+```
+
+Expected result:
+
+- `kbintake.exe`, `kbintakew.exe`, and `kbintake.ico` are staged under `%LOCALAPPDATA%\Programs\kbintake`.
+- Explorer registry entries point at `kbintakew.exe explorer run-import`.
+- Manual prompts confirm success, duplicate, and failure toasts.
+- Manual prompts confirm Explorer imports do not show a console window.
+
+From an elevated Administrator PowerShell session:
+
+```powershell
+.\scripts\validate-service-mode.ps1
+```
+
+Expected result:
+
+- The `KBIntake` service installs, starts, stops, and uninstalls.
+- A queued import is processed automatically by the service.
+- `%TEMP%\kbintake-service-check\logs\service.log` is created.
+
 ## CLI Validation
 
 Use a temporary test directory that is not an important vault:
@@ -104,5 +131,5 @@ Local runtime state is stored under `%LOCALAPPDATA%\kbintake` by default. Do not
 
 - Registry scripts still use editable placeholders when used manually; prefer `kbintake explorer install`.
 - Only a local-folder target is implemented.
-- Windows service mode still needs elevated SCM validation and reboot-resume validation.
-- Explorer validation is manual.
+- Windows service reboot-resume validation is still manual.
+- Explorer toast/no-console validation requires manual confirmation.

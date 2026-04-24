@@ -139,6 +139,7 @@ For a stable per-user development install:
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
 Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
+Copy-Item .\target\release\kbintakew.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintakew.exe" -Force
 Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor --fix
 ```
@@ -165,6 +166,17 @@ kbintake explorer uninstall
 ```
 
 The reviewable `.reg` fallbacks are still in `kbintake/scripts/`.
+
+## Manual Validation Scripts
+
+The `scripts/` directory contains repeatable Windows smoke checks for the remaining UI and service validation work:
+
+```powershell
+.\scripts\validate-explorer-toast.ps1
+.\scripts\validate-service-mode.ps1
+```
+
+`validate-explorer-toast.ps1` stages both release binaries, registers Explorer against `kbintakew.exe`, and prompts for manual toast/no-console confirmation. `validate-service-mode.ps1` must be run from an elevated Administrator PowerShell session because it installs and removes the Windows Service.
 
 ## Project Documents
 

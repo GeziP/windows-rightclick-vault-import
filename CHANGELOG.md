@@ -18,6 +18,7 @@ Initial v1.0 release candidate for KBIntake, a Windows-friendly local vault impo
 - Markdown frontmatter injection with `[import].inject_frontmatter` opt-out.
 - Per-target vault stats with JSON output.
 - Explorer context-menu install/uninstall commands and reviewable registry scripts.
+- Manual validation scripts for Explorer toast/no-console behavior and Windows Service mode.
 - Windows CI for formatting, clippy, build, and test gates.
 - Release workflow that publishes `kbintake.exe`, `kbintake.ico`, and `SHA256SUMS.txt` for tagged releases.
 - NSIS per-user installer that installs KBIntake, registers Explorer context menus, adds KBIntake to the user PATH, and provides an uninstaller.

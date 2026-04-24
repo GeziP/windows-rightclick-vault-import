@@ -106,9 +106,11 @@ Goal: make the MVP testable, diagnosable, and safe for local use.
 - Integration tests cover config bootstrap, idempotent schema initialization, import enqueue, successful agent drain, and duplicate handling.
 - CI workflow coverage is defined for Windows with formatting, clippy, build, and test gates.
 - Explorer registration now includes a first-party `kbintake explorer install/uninstall` command, icon support, unregister scripts, and README verification guidance.
+- Explorer toast/no-console behavior is implemented through `kbintakew.exe`; `scripts/validate-explorer-toast.ps1` captures the remaining manual validation path for issue #42.
 - v0.1 release validation is tracked in `docs/RELEASE_CHECKLIST.md`.
 - Target configuration can be updated from the CLI with `kbintake config set-target`, and `doctor` validates schema plus target writability.
 - Multiple targets can be added/listed from the CLI, and imports can explicitly select a target with `--target`.
 - Imports can optionally process immediately with `kbintake import --process`.
 - Failed batch items can be requeued with `kbintake jobs retry <batch-id>`.
 - Target configuration can be renamed and removed from the CLI without editing `config.toml`.
+- Windows Service mode is implemented behind `kbintake service install/start/stop/uninstall/status`; `scripts/validate-service-mode.ps1` captures the remaining elevated SCM validation path for issue #46.
