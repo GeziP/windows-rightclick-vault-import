@@ -147,6 +147,6 @@ Runtime state is stored under `%LOCALAPPDATA%\kbintake`. Do not delete it unless
 
 - Release binaries are not Authenticode signed yet.
 - Windows SmartScreen may warn on first run.
-- Public winget publication is not complete until #43 has a submitted `microsoft/winget-pkgs` PR.
+- Public winget availability is not complete until `microsoft/winget-pkgs#364698` is merged.
 - Only local-folder targets are implemented.
 - Windows service reboot-resume validation is still manual.

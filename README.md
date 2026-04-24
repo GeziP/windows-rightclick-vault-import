@@ -41,9 +41,11 @@ The installer:
 
 ### Winget Status
 
-The winget manifest is prepared and validated in `installer/winget/1.0.0`, but the package is not yet published to the community winget source. Until issue #43 is complete, use the GitHub Release installer.
+The winget manifest is prepared and validated in `installer/winget/1.0.0`, and the community package PR has been submitted: <https://github.com/microsoft/winget-pkgs/pull/364698>.
 
-Planned command after publication:
+Until that PR is merged into the public winget source, use the GitHub Release installer.
+
+Expected command after publication:
 
 ```powershell
 winget install GeziP.KBIntake
@@ -222,8 +224,8 @@ Manual Windows smoke checks:
 
 ## Planned Work
 
-- submit the validated winget manifest to `microsoft/winget-pkgs`
-- complete winget local install smoke once `LocalManifestFiles` is enabled
+- monitor the `microsoft/winget-pkgs` PR for winget publication
+- complete public winget install smoke after merge
 - code-sign release binaries to reduce SmartScreen friction
 - add first-class installer options for service install/start
 - perform reboot-resume validation for service mode

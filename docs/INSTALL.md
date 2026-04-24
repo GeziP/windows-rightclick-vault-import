@@ -110,7 +110,13 @@ It validates locally with:
 winget validate --manifest .\installer\winget\1.0.0
 ```
 
-The package is not yet available from the public winget community source. After issue #43 is complete, install will use:
+The community package PR has been submitted:
+
+```text
+https://github.com/microsoft/winget-pkgs/pull/364698
+```
+
+The package is not yet available from the public winget community source. After the PR is merged, install will use:
 
 ```powershell
 winget install GeziP.KBIntake

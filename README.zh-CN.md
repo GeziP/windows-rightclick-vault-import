@@ -67,9 +67,11 @@ kbintake doctor
 installer\winget\1.0.0
 ```
 
-但它还没有提交并合并到 `microsoft/winget-pkgs`。在 issue #43 完成前，请先使用 GitHub Release 里的安装包。
+社区仓库 PR 已提交：<https://github.com/microsoft/winget-pkgs/pull/364698>
 
-发布到 winget 后，计划使用：
+在 PR 合并到 public winget source 前，请先使用 GitHub Release 里的安装包。
+
+发布到 winget 后，预计使用：
 
 ```powershell
 winget install GeziP.KBIntake
@@ -229,8 +231,8 @@ Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
 
 ## 待开发和后续计划
 
-- 把 winget manifest 提交到 `microsoft/winget-pkgs`
-- 完成 winget 本地安装 smoke test
+- 跟进 `microsoft/winget-pkgs` PR 合并
+- 合并后完成 public winget install smoke test
 - 给发布二进制做 Authenticode 签名，降低 SmartScreen 提示
 - 在安装器里提供安装并启动 Windows Service 的选项
 - 补做 service reboot-resume 验证

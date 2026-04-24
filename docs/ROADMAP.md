@@ -80,13 +80,12 @@ Status:
 - installer URL points at the `v1.0.0` GitHub Release
 - installer SHA-256 matches the release asset
 - `winget validate --manifest .\installer\winget\1.0.0` passes
+- PR submitted: `https://github.com/microsoft/winget-pkgs/pull/364698`
 
 Remaining:
 
-- enable local winget manifest installs on a test machine
-- run local install smoke using the manifest
-- submit PR to `microsoft/winget-pkgs`
-- link the PR in #43
+- monitor automated validation in `microsoft/winget-pkgs`
+- run public install smoke after merge
 
 ### Epic #40: v1.0 distribution and polish
 
@@ -98,7 +97,7 @@ Service mode is implemented and validated, but the broader epic remains open for
 
 ## Planned Features
 
-- public winget installation through `winget install GeziP.KBIntake`
+- public winget installation through `winget install GeziP.KBIntake` after the package PR is merged
 - Authenticode code signing
 - installer option to install/start the Windows Service
 - reboot-resume validation for service mode
@@ -110,7 +109,7 @@ Service mode is implemented and validated, but the broader epic remains open for
 ## Known Limitations
 
 - release binaries are not code-signed, so Windows SmartScreen may warn
-- winget publication is not complete yet
+- winget package PR is submitted but not merged yet
 - service install/start requires Administrator PowerShell
 - service reboot-resume is not yet manually validated
 - only local-folder vault targets are implemented

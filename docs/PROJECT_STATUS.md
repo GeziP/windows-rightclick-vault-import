@@ -63,13 +63,12 @@ Current status:
 - release URL exists
 - installer SHA-256 is recorded in `installer/winget/1.0.0`
 - manifest validation passes
+- PR submitted to `microsoft/winget-pkgs`: `https://github.com/microsoft/winget-pkgs/pull/364698`
 
 Remaining:
 
-- enable local manifest installs on a test machine
-- run `winget install --manifest .\installer\winget\1.0.0`
-- submit a PR to `microsoft/winget-pkgs`
-- link the PR in issue #43
+- monitor winget-pkgs automated validation
+- complete public `winget install GeziP.KBIntake` smoke test after merge
 
 ### Distribution hardening
 
