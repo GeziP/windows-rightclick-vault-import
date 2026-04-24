@@ -1,46 +1,63 @@
 # KBIntake Install Guide
 
+This guide is for Windows users who want KBIntake installed for Explorer right-click imports and PowerShell use.
+
 ## Recommended Install
 
-Use this path if you want KBIntake available from Explorer and PowerShell without building Rust code yourself.
+1. Open the release page:
 
-1. Open the project's GitHub Releases page.
+```text
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
+```
+
 2. Download `KBIntake-Setup.exe`.
 3. Run the installer.
-4. Right-click a file in Explorer and choose the KBIntake action.
+4. Open a new PowerShell window.
+5. Run:
 
-The installer places KBIntake in:
+```powershell
+kbintake doctor
+```
+
+Expected healthy output includes:
+
+- `[OK] Config file`
+- `[OK] Database schema`
+- `[OK] Target directory`
+- `[OK] Explorer context menu`
+- `[OK] PATH`
+
+## What The Installer Does
+
+The installer is per-user and does not require Administrator privileges.
+
+It writes files to:
 
 ```text
 %LOCALAPPDATA%\Programs\kbintake
 ```
 
+Installed files:
+
+- `kbintake.exe`: command-line binary
+- `kbintakew.exe`: Explorer-friendly binary that does not show a console window
+- `kbintake.ico`: icon used by Explorer entries
+- `Uninstall.exe`: uninstaller
+
 It also:
 
-- installs `kbintake.exe`
-- installs `kbintakew.exe`
-- installs `kbintake.ico`
-- adds the install directory to your user PATH
-- registers Explorer context-menu entries
-- writes an uninstall entry in Windows settings
-
-## First Run Check
-
-Open PowerShell and run:
-
-```powershell
-kbintake doctor --fix
-```
-
-That creates any missing local directories and reports whether the database, target directory, Explorer menu, and PATH look healthy.
+- adds the install directory to the current user's `PATH`
+- registers Explorer context menus for files and folders
+- creates an uninstall entry in Windows Settings
 
 ## First Import
 
 Explorer path:
 
-1. Right-click a file.
+1. Right-click a file or folder.
 2. Choose the KBIntake action.
-3. Open PowerShell and run:
+3. Wait for the toast notification.
+4. Inspect recent jobs:
 
 ```powershell
 kbintake jobs list
@@ -55,7 +72,9 @@ kbintake jobs list
 
 ## Optional Background Service
 
-If you want queued imports processed automatically in the background, open an elevated Administrator PowerShell and run:
+Most users can use Explorer imports or `import --process` without installing the service.
+
+If you want queued imports processed continuously in the background, open an elevated Administrator PowerShell and run:
 
 ```powershell
 kbintake service install
@@ -63,23 +82,52 @@ kbintake service start
 kbintake service status
 ```
 
-To stop and remove it later:
+Stop and remove it later:
 
 ```powershell
 kbintake service stop
 kbintake service uninstall
+kbintake service status
+```
+
+Expected final status:
+
+```text
+Service status: not installed
+```
+
+## Winget
+
+The winget manifest is present in this repository under:
+
+```text
+installer\winget\1.0.0
+```
+
+It validates locally with:
+
+```powershell
+winget validate --manifest .\installer\winget\1.0.0
+```
+
+The package is not yet available from the public winget community source. After issue #43 is complete, install will use:
+
+```powershell
+winget install GeziP.KBIntake
 ```
 
 ## Install From Source
 
-If you are developing KBIntake or want a local build:
+Use this path for development.
+
+Install Rust from <https://rustup.rs>, then:
 
 ```powershell
 cd kbintake
-cargo build --release
+cargo build --release --locked --bins
 ```
 
-Copy it into a stable per-user location:
+Install the local build into your user profile:
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
@@ -87,21 +135,33 @@ Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbi
 Copy-Item .\target\release\kbintakew.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintakew.exe" -Force
 Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
 & "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor --fix
-& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer install
 ```
 
-For repeatable development validation, use the scripts from the repository root:
+## Build The Installer Locally
+
+Install NSIS, then from the repository root:
 
 ```powershell
-.\scripts\validate-explorer-toast.ps1
-.\scripts\validate-service-mode.ps1
+New-Item -ItemType Directory -Force .\dist | Out-Null
+Copy-Item .\kbintake\target\release\kbintake.exe .\dist\kbintake.exe -Force
+Copy-Item .\kbintake\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
+Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
+& "C:\Program Files (x86)\NSIS\makensis.exe" .\installer\kbintake.nsi
 ```
 
-The service validation script installs a Windows Service and must be run from an elevated Administrator PowerShell session.
+Output:
+
+```text
+dist\KBIntake-Setup.exe
+```
 
 ## Uninstall
 
-If KBIntake was installed through the installer, remove it from Windows Settings like any other app.
+If installed with `KBIntake-Setup.exe`, uninstall from Windows Settings or run:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\kbintake\Uninstall.exe"
+```
 
 Manual cleanup path:
 
@@ -110,14 +170,20 @@ kbintake explorer uninstall
 Remove-Item "$env:LOCALAPPDATA\Programs\kbintake" -Recurse -Force
 ```
 
-Runtime state is stored separately under `%LOCALAPPDATA%\kbintake`. Leave that directory alone unless you intentionally want to remove config, queue history, manifests, and the default vault.
+Runtime state is stored separately under:
+
+```text
+%LOCALAPPDATA%\kbintake
+```
+
+Do not delete it unless you intentionally want to remove config, queue history, manifests, logs, and the default vault.
 
 ## Troubleshooting
 
 If `kbintake` is not recognized:
 
 - open a new PowerShell window
-- or add `%LOCALAPPDATA%\Programs\kbintake` to your user PATH manually
+- verify `%LOCALAPPDATA%\Programs\kbintake` is on your user `PATH`
 
 If the Explorer menu is missing:
 
@@ -135,4 +201,4 @@ kbintake doctor --fix
 If `kbintake service install` reports access denied:
 
 - open PowerShell as Administrator
-- then run the service command again
+- run the service command again

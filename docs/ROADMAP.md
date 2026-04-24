@@ -1,116 +1,137 @@
 # Development Roadmap
 
-This backlog turns the current Rust scaffold into an MVP for a Windows right-click vault import tool. The execution strategy is: make the CLI reliable first, add a background worker second, then integrate Explorer context menus.
+This roadmap tracks KBIntake after the `v1.0.0` Windows release.
 
-## Epic E1: Rust Crate Foundation
+## Current Release
 
-Goal: create a compilable `kbintake` Rust application with predictable module boundaries.
+`v1.0.0` is available from GitHub Releases:
 
-- Issue I01: Scaffold Cargo project
-  - Create `kbintake/Cargo.toml`, `src/main.rs`, and module directories from `kbintake_rust_scaffold.md`.
-  - Acceptance: `cargo fmt` and `cargo build` run from `kbintake/`.
-- Issue I02: Add logging and app bootstrap
-  - Implement `logging::init_logging()` and `App::bootstrap()`.
-  - Acceptance: CLI starts, initializes config and database paths, and emits structured logs.
-- Issue I03: Normalize developer setup
-  - Document Rust toolchain installation and Windows prerequisites.
-  - Acceptance: README includes setup steps and common troubleshooting.
+```text
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
+```
 
-## Epic E2: Configuration and SQLite Storage
+The release includes:
 
-Goal: persist import jobs and configuration locally without requiring external services.
+- `KBIntake-Setup.exe`
+- `kbintake.exe`
+- `kbintakew.exe`
+- `kbintake.ico`
+- `SHA256SUMS.txt`
 
-- Issue I04: Implement app config
-  - Load or initialize config under the user data directory.
-  - Acceptance: `kbintake config-show` prints effective target and import settings.
-- Issue I05: Create SQLite schema
-  - Add tables for batches, items, manifest records, and events.
-  - Acceptance: `doctor` creates or validates the database idempotently.
-- Issue I06: Implement queue repository
-  - Add insert, lookup, list, status update, and manifest operations.
-  - Acceptance: repository unit tests cover happy path and missing-row behavior.
+## Completed Milestones
 
-## Epic E3: CLI Import Workflow
+### Foundation
 
-Goal: allow users to enqueue files or directories from a terminal.
+- Rust crate scaffold and module boundaries
+- CLI bootstrap, logging, config bootstrap, and SQLite initialization
+- Windows CI for formatting, clippy, build, and tests
 
-- Issue I07: Implement scanner
-  - Expand file and directory inputs into importable files.
-  - Acceptance: nested directories are walked and missing inputs fail clearly.
-- Issue I08: Implement `import`
-  - Create a batch and item rows for each discovered file.
-  - Acceptance: `kbintake import <path>` prints batch ID, item count, and target.
-- Issue I09: Implement `jobs list/show`
-  - Display recent batches and item details.
-  - Acceptance: users can inspect queued, running, successful, failed, and duplicate items.
+### Core Import Flow
 
-## Epic E4: Processing Pipeline and Agent
+- file and directory scanning
+- SQLite-backed batches and items
+- `kbintake import`
+- `kbintake jobs list/show`
+- validation, hashing, dedupe, deterministic copy conflict handling
+- one-shot processing through `import --process`
+- retry for failed jobs
+- hash-safe undo
 
-Goal: move queued work through validation, hashing, dedupe, copy, and manifest creation.
+### Vault Management
 
-- Issue I10: Add validation and hashing
-  - Check file existence, type, size limits, and compute SHA-256.
-  - Acceptance: invalid files are marked failed with stable error codes.
-- Issue I11: Add local-folder adapter
-  - Copy source files into the configured vault target safely.
-  - Acceptance: name conflicts are handled deterministically without overwriting content.
-- Issue I12: Add dedupe and manifest writes
-  - Detect duplicate target/hash pairs and record successful imports.
-  - Acceptance: duplicate imports do not create extra file copies.
-- Issue I13: Implement agent loop
-  - Poll queued items, process them, and update item/batch status.
-  - Acceptance: `kbintake agent` drains a queued batch end to end.
+- default target configuration
+- multiple target add/list/show/rename/remove/set-default
+- archived targets
+- extension-based routing rules
+- per-target vault stats
 
-## Epic E5: Windows Explorer Integration
+### Explorer And Notifications
 
-Goal: expose the import command through file and directory right-click menus.
+- `kbintake explorer install/uninstall`
+- right-click menu registration for files and folders
+- `kbintakew.exe` Windows-subsystem binary for no-console Explorer imports
+- success, duplicate, and failure toast notifications
+- manual validation through `scripts/validate-explorer-toast.ps1`
 
-- Issue I14: Generate registry scripts
-  - Add file and directory context-menu registration scripts with placeholders.
-  - Acceptance: scripts are reviewable and do not hard-code developer-local paths.
-- Issue I15: Add installer guidance
-  - Document how to build the exe, place it, and apply/remove registry entries.
-  - Acceptance: README includes registration, unregistration, and safety notes.
-- Issue I19: Add Explorer install command
-  - Register and unregister per-user file and directory context menus from the CLI.
-  - Acceptance: `kbintake explorer install` writes HKCU menu, command, and icon values; `kbintake explorer uninstall` removes them.
+### Installer And Release
 
-## Epic E6: Quality, Release, and Hardening
+- NSIS per-user installer
+- PATH update and uninstall entry
+- Explorer registration during install
+- release workflow triggered by `v*.*.*` tags
+- `v1.0.0` GitHub Release assets
+- repo-local winget manifest copy
 
-Goal: make the MVP testable, diagnosable, and safe for local use.
+### Background Processing
 
-- Issue I16: Add integration tests
-  - Test config bootstrap, database migration, import enqueue, and worker success.
-  - Acceptance: tests use temporary directories and do not touch real user vaults.
-- Issue I17: Add CI workflow
-  - Run format, clippy, build, and tests on pull requests.
-  - Acceptance: GitHub Actions status reports pass/fail for every PR.
-- Issue I18: Prepare v0.1 release checklist
-  - Define manual Windows validation steps and known limitations.
-  - Acceptance: release notes list commands tested, Windows version, and rollback steps.
+- `kbintake service install/start/stop/uninstall/status`
+- hidden `service run` dispatcher
+- service logging under `%LOCALAPPDATA%\kbintake\logs`
+- queue processing from Windows Service mode
+- manual SCM validation through `scripts/validate-service-mode.ps1`
 
-## Planned Execution Order
+## Active Work
 
-1. E1 foundation.
-2. E2 configuration and database.
-3. E3 CLI enqueue and inspection.
-4. E4 processing agent.
-5. E6 tests and CI for the completed MVP path.
-6. E5 Explorer integration after CLI and agent are stable.
+### Issue #43: winget publication
 
-## Current Status
+Status:
 
-- GitHub issue tracking is available; MVP processing loop work is tracked in issue #25.
-- Rust build/test tooling is available in the current shell.
-- The CLI import and one-shot agent path has focused unit coverage for scanning, queue state, deterministic copy conflicts, duplicate detection, invalid sources, and partial-import rejection.
-- Integration tests cover config bootstrap, idempotent schema initialization, import enqueue, successful agent drain, and duplicate handling.
-- CI workflow coverage is defined for Windows with formatting, clippy, build, and test gates.
-- Explorer registration now includes a first-party `kbintake explorer install/uninstall` command, icon support, unregister scripts, and README verification guidance.
-- Explorer toast/no-console behavior is implemented through `kbintakew.exe`; `scripts/validate-explorer-toast.ps1` captures the remaining manual validation path for issue #42.
-- v0.1 release validation is tracked in `docs/RELEASE_CHECKLIST.md`.
-- Target configuration can be updated from the CLI with `kbintake config set-target`, and `doctor` validates schema plus target writability.
-- Multiple targets can be added/listed from the CLI, and imports can explicitly select a target with `--target`.
-- Imports can optionally process immediately with `kbintake import --process`.
-- Failed batch items can be requeued with `kbintake jobs retry <batch-id>`.
-- Target configuration can be renamed and removed from the CLI without editing `config.toml`.
-- Windows Service mode is implemented behind `kbintake service install/start/stop/uninstall/status`; `scripts/validate-service-mode.ps1` captures the remaining elevated SCM validation path for issue #46.
+- manifest files exist under `installer/winget/1.0.0`
+- installer URL points at the `v1.0.0` GitHub Release
+- installer SHA-256 matches the release asset
+- `winget validate --manifest .\installer\winget\1.0.0` passes
+
+Remaining:
+
+- enable local winget manifest installs on a test machine
+- run local install smoke using the manifest
+- submit PR to `microsoft/winget-pkgs`
+- link the PR in #43
+
+### Epic #40: v1.0 distribution and polish
+
+Mostly complete. It remains open because #43 is still open.
+
+### Epic #45: v1.x background service
+
+Service mode is implemented and validated, but the broader epic remains open for follow-up background-operation polish.
+
+## Planned Features
+
+- public winget installation through `winget install GeziP.KBIntake`
+- Authenticode code signing
+- installer option to install/start the Windows Service
+- reboot-resume validation for service mode
+- richer configuration editing commands for routing rules
+- improved release notes and checksum verification guidance
+- GitHub Actions dependency updates ahead of Node 20 deprecation
+- future migration tests for any new schema changes
+
+## Known Limitations
+
+- release binaries are not code-signed, so Windows SmartScreen may warn
+- winget publication is not complete yet
+- service install/start requires Administrator PowerShell
+- service reboot-resume is not yet manually validated
+- only local-folder vault targets are implemented
+
+## Validation Commands
+
+Run from `kbintake/`:
+
+```powershell
+cargo fmt --all -- --check
+cargo test --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo build --locked
+cargo build --release --locked --bins
+```
+
+Run from the repository root:
+
+```powershell
+.\scripts\validate-explorer-toast.ps1
+.\scripts\validate-service-mode.ps1
+```
+
+`validate-service-mode.ps1` requires an elevated Administrator PowerShell session.

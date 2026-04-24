@@ -2,7 +2,7 @@
 
 ## v1.0.0
 
-Initial v1.0 release candidate for KBIntake, a Windows-friendly local vault import CLI.
+Initial v1.0 release for KBIntake, a Windows-friendly local vault import CLI and Explorer integration.
 
 ### Added
 
@@ -20,12 +20,12 @@ Initial v1.0 release candidate for KBIntake, a Windows-friendly local vault impo
 - Explorer context-menu install/uninstall commands and reviewable registry scripts.
 - Manual validation scripts for Explorer toast/no-console behavior and Windows Service mode.
 - Windows CI for formatting, clippy, build, and test gates.
-- Release workflow that publishes `kbintake.exe`, `kbintake.ico`, and `SHA256SUMS.txt` for tagged releases.
+- Release workflow that publishes `KBIntake-Setup.exe`, `kbintake.exe`, `kbintakew.exe`, `kbintake.ico`, and `SHA256SUMS.txt` for tagged releases.
 - NSIS per-user installer that installs KBIntake, registers Explorer context menus, adds KBIntake to the user PATH, and provides an uninstaller.
 
 ### Notes
 
-- The release binary is not Authenticode signed yet. Windows SmartScreen may warn on first run.
+- The release binaries and installer are not Authenticode signed yet. Windows SmartScreen may warn on first run.
 - Verify the downloaded executable manually:
 
 ```powershell

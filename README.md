@@ -1,36 +1,68 @@
 # KBIntake
 
-KBIntake is a Windows tool for sending files and folders into a local knowledge-base vault. You can use it from PowerShell or from the Windows Explorer right-click menu.
+KBIntake is a Windows-first local vault importer. It lets you send files and folders into a knowledge-base vault from PowerShell or from the Windows Explorer right-click menu, while keeping an auditable SQLite job history.
+
+Current release: `v1.0.0`
+
+- Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0>
+- Chinese README: [README.zh-CN.md](README.zh-CN.md)
+
+## What It Is For
+
+KBIntake is built for people who collect notes, PDFs, screenshots, exports, and reference files throughout the day and want a repeatable way to move them into a local vault. Instead of manually copying files, checking for duplicates, renaming conflicts, and remembering where each file went, KBIntake records every import as a job and stores the resulting file manifest.
+
+The default target is a local folder vault, such as:
+
+```text
+C:\Users\<you>\Documents\KBIntakeVault
+```
+
+KBIntake does not require a cloud service. Configuration, queue state, manifests, logs, and the default vault are local to your Windows profile.
 
 ## Install
 
-Preferred install path for regular Windows users:
+### Recommended
 
-1. Open the project's GitHub Releases page.
+1. Open the [v1.0.0 release page](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0).
 2. Download `KBIntake-Setup.exe`.
 3. Run the installer.
+4. Open a new PowerShell window and run:
 
-After installation, KBIntake is copied into your user profile, added to your user PATH, and the Explorer right-click entries are registered for files and folders.
+```powershell
+kbintake doctor
+```
 
-Planned:
+The installer:
 
-- `winget install GeziP.KBIntake`
+- installs `kbintake.exe`, `kbintakew.exe`, and `kbintake.ico` under `%LOCALAPPDATA%\Programs\kbintake`
+- adds that directory to your user `PATH`
+- registers Explorer right-click entries for files and folders
+- creates a Windows Settings uninstall entry
 
-Build-from-source instructions are still available below for development and local validation.
+### Winget Status
+
+The winget manifest is prepared and validated in `installer/winget/1.0.0`, but the package is not yet published to the community winget source. Until issue #43 is complete, use the GitHub Release installer.
+
+Planned command after publication:
+
+```powershell
+winget install GeziP.KBIntake
+```
 
 ## Quick Start
 
-1. Install KBIntake.
-2. Right-click a file in Explorer and choose the KBIntake action.
-3. Open PowerShell and run:
+Explorer flow:
+
+1. Right-click a file or folder.
+2. Choose the KBIntake action.
+3. KBIntake imports it silently and shows a Windows toast notification.
+4. Inspect the result:
 
 ```powershell
 kbintake jobs list
 ```
 
-That shows the recent import batch and its status.
-
-If you prefer the terminal flow, this is the shortest path:
+Terminal flow:
 
 ```powershell
 kbintake doctor --fix
@@ -38,20 +70,32 @@ kbintake import --process C:\path\to\note.md
 kbintake jobs list
 ```
 
-See [docs/INSTALL.md](docs/INSTALL.md) for the fuller walkthrough.
+## Features
 
-## What KBIntake Does
+- Explorer right-click import for files and folders
+- no-console Explorer flow through `kbintakew.exe`
+- Windows toast notifications for success, duplicate, and failure cases
+- terminal import flow with optional immediate processing
+- SQLite-backed batches, items, manifests, and audit events
+- SHA-256 hashing and per-target duplicate detection
+- deterministic filename conflict handling without overwriting existing files
+- multiple vault targets with add/list/show/rename/remove/set-default commands
+- extension-based routing rules in `config.toml`
+- Markdown frontmatter injection with an opt-out
+- dry-run preview with table or JSON output
+- job list/show with table or JSON output
+- retry failed jobs
+- hash-safe undo for imported batches
+- per-target vault statistics
+- Windows Service mode for background queue processing
+- release workflow that publishes installer and binary assets
+- winget manifest copy stored under `installer/winget/`
 
-- Imports one or more files or folders into a local vault target.
-- Queues work in SQLite so imports can be inspected and retried.
-- Deduplicates by SHA-256 hash per target.
-- Supports multiple targets plus extension-based routing rules.
-- Adds KBIntake frontmatter to imported Markdown files by default.
-- Supports dry-run previews, undo, job inspection, vault stats, and Explorer integration.
-
-## Command Reference
+## Common Commands
 
 ```text
+kbintake --version
+kbintake version
 kbintake doctor [--fix] [--migrate]
 kbintake config show
 kbintake config set-target <path> [--name <name>]
@@ -62,51 +106,61 @@ kbintake targets add <name> <path>
 kbintake targets rename <target> <new-name>
 kbintake targets remove <target> [--force]
 kbintake targets set-default <target>
+kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
+kbintake jobs list [--status <status>] [--limit <n>] [--json] [--table]
+kbintake jobs show <batch-id> [--json] [--table]
+kbintake jobs retry <batch-id>
+kbintake jobs undo <batch-id> [--force]
+kbintake vault stats [--target <target>] [--json]
 kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only]
 kbintake explorer uninstall
-kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
 kbintake agent
 kbintake service install
 kbintake service start
 kbintake service stop
 kbintake service uninstall
 kbintake service status
-kbintake jobs list [--status <status>] [--limit <n>] [--json] [--table]
-kbintake jobs show <batch-id> [--json] [--table]
-kbintake jobs retry <batch-id>
-kbintake jobs undo <batch-id> [--force]
-kbintake vault stats [--target <target>] [--json]
 ```
 
 ## Configuration
 
-KBIntake stores its runtime state in `%LOCALAPPDATA%\kbintake` by default:
+Runtime state lives in `%LOCALAPPDATA%\kbintake` by default:
 
 - `config.toml`
 - `data\kbintake.db`
+- `logs\`
 - `vault\`
 
-The main settings are:
+Important config sections:
 
-- target list and default target
-- `[import].max_file_size_mb`
-- `[import].inject_frontmatter`
-- `[agent].poll_interval_secs`
-- `[[routing]]` extension rules
+- `[[targets]]`: vault destinations
+- `[[routing]]`: extension rules, such as sending PDFs to an archive target
+- `[import].max_file_size_mb`: file size guardrail
+- `[import].inject_frontmatter`: Markdown metadata injection
+- `[agent].poll_interval_secs`: background worker polling interval
 
-Full reference:
+Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
 
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
+## Background Processing
 
-## Vault Stats
+For terminal use, `kbintake import --process <path>` queues and processes immediately.
 
-Use `vault stats` for a per-target snapshot:
+For passive background processing, install the Windows Service from an elevated Administrator PowerShell:
 
 ```powershell
-kbintake vault stats
-kbintake vault stats --target archive
-kbintake vault stats --json
+kbintake service install
+kbintake service start
+kbintake service status
 ```
+
+To remove it:
+
+```powershell
+kbintake service stop
+kbintake service uninstall
+```
+
+Service mode is implemented and validated for install/start/queue processing/logging/stop/uninstall. Reboot-resume validation remains a release-checklist manual item.
 
 ## Troubleshooting
 
@@ -116,74 +170,75 @@ Start with:
 kbintake doctor
 ```
 
-Useful fixes:
+Common fixes:
 
 - Missing target directory: `kbintake doctor --fix`
 - Wrong vault target: `kbintake config set-target <path>`
-- Missing Explorer menu: `kbintake explorer install`
-- Schema mismatch after upgrades: `kbintake doctor --migrate`
-- Service install/start access denied: open an elevated Administrator PowerShell before running `kbintake service install`
-- PATH not updated: restart PowerShell, or add `%LOCALAPPDATA%\Programs\kbintake` to your user PATH
+- Explorer menu missing: `kbintake explorer install`
+- Schema needs migration: `kbintake doctor --migrate`
+- `kbintake` not found after install: open a new PowerShell window
+- Service install/start access denied: use Administrator PowerShell
 
 ## Build From Source
 
-Install Rust from <https://rustup.rs>, then build from `kbintake/`:
+Install Rust from <https://rustup.rs>, then:
 
 ```powershell
 cd kbintake
-cargo build --release
+cargo build --release --locked --bins
 ```
 
-For a stable per-user development install:
+To build the installer locally, install NSIS and run from the repository root:
 
 ```powershell
-New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
-Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
-Copy-Item .\target\release\kbintakew.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintakew.exe" -Force
-Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
-& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor --fix
+New-Item -ItemType Directory -Force .\dist | Out-Null
+Copy-Item .\kbintake\target\release\kbintake.exe .\dist\kbintake.exe -Force
+Copy-Item .\kbintake\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
+Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
+& "C:\Program Files (x86)\NSIS\makensis.exe" .\installer\kbintake.nsi
 ```
 
-## Windows Explorer Integration
+## Validation
 
-Register context-menu entries:
+Automated checks:
 
 ```powershell
-kbintake explorer install
+cd kbintake
+cargo fmt --all -- --check
+cargo test --locked
+cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo build --locked
+cargo build --release --locked --bins
 ```
 
-Verify:
-
-```powershell
-reg query "HKCU\Software\Classes\*\shell\KBIntake\command"
-reg query "HKCU\Software\Classes\Directory\shell\KBIntake\command"
-```
-
-Remove them:
-
-```powershell
-kbintake explorer uninstall
-```
-
-The reviewable `.reg` fallbacks are still in `kbintake/scripts/`.
-
-## Manual Validation Scripts
-
-The `scripts/` directory contains repeatable Windows smoke checks for the remaining UI and service validation work:
+Manual Windows smoke checks:
 
 ```powershell
 .\scripts\validate-explorer-toast.ps1
 .\scripts\validate-service-mode.ps1
 ```
 
-`validate-explorer-toast.ps1` stages both release binaries, registers Explorer against `kbintakew.exe`, and prompts for manual toast/no-console confirmation. `validate-service-mode.ps1` must be run from an elevated Administrator PowerShell session because it installs and removes the Windows Service.
+`validate-service-mode.ps1` requires an elevated Administrator PowerShell session.
+
+## Planned Work
+
+- submit the validated winget manifest to `microsoft/winget-pkgs`
+- complete winget local install smoke once `LocalManifestFiles` is enabled
+- code-sign release binaries to reduce SmartScreen friction
+- add first-class installer options for service install/start
+- perform reboot-resume validation for service mode
+- improve GitHub Actions ahead of the Node 20 deprecation
+- continue E9 follow-up work around passive background operation
+
+See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Project Documents
 
+- [Chinese README](README.zh-CN.md)
 - [Install guide](docs/INSTALL.md)
 - [Configuration reference](docs/CONFIGURATION.md)
-- [Product Requirements Document (v2)](docs/PRD.md)
-- [Contributor guide](AGENTS.md)
-- [Development roadmap](docs/ROADMAP.md)
+- [Project status](docs/PROJECT_STATUS.md)
 - [Release checklist](docs/RELEASE_CHECKLIST.md)
-- [Rust scaffold](kbintake_rust_scaffold.md)
+- [Development roadmap](docs/ROADMAP.md)
+- [Product requirements](docs/PRD.md)
+- [Contributor guide](AGENTS.md)

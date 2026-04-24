@@ -1,15 +1,13 @@
-# v0.1 Release Checklist
+# v1.0 Release Checklist
 
-Use this checklist for the first local Windows MVP release.
+Use this checklist for the Windows `v1.0.0` release and future patch releases.
 
 ## Release Metadata
 
-- Version:
-- Release commit:
-- Windows version:
-- Rust version from `rustc --version`:
-- Cargo version from `cargo --version`:
-- Validation date:
+- Version: `v1.0.0`
+- Release commit: `f6cec70` for the tag build, followed by `9cab26d` for winget manifest hash update
+- GitHub Release: `https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0`
+- Validation date: 2026-04-24
 
 ## Automated Checks
 
@@ -20,14 +18,51 @@ cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --all-targets --all-features --locked -- -D warnings
 cargo build --locked
-cargo build --release --locked
+cargo build --release --locked --bins
 ```
 
-Record the command output or CI run link in the release notes.
+The release workflow also runs tests and builds release binaries for `x86_64-pc-windows-msvc`.
 
-## Scripted Windows Smoke Checks
+## Release Assets
 
-Run the repeatable validation scripts from the repository root after the automated checks pass:
+Expected GitHub Release assets:
+
+- `KBIntake-Setup.exe`
+- `kbintake.exe`
+- `kbintakew.exe`
+- `kbintake.ico`
+- `SHA256SUMS.txt`
+
+Users should prefer `KBIntake-Setup.exe`.
+
+## Installer Smoke Check
+
+Install from the generated setup executable:
+
+```powershell
+.\dist\KBIntake-Setup.exe
+```
+
+Open a new PowerShell window:
+
+```powershell
+kbintake --version
+kbintake version
+kbintake doctor
+```
+
+Expected result:
+
+- version commands print `kbintake 1.0.0`
+- config is under `%LOCALAPPDATA%\kbintake`
+- schema reports `Schema version: 3 (up to date)`
+- target directory is OK
+- Explorer context menu is registered
+- PATH check is OK
+
+## Explorer Toast Smoke Check
+
+Run from the repository root:
 
 ```powershell
 .\scripts\validate-explorer-toast.ps1
@@ -35,12 +70,14 @@ Run the repeatable validation scripts from the repository root after the automat
 
 Expected result:
 
-- `kbintake.exe`, `kbintakew.exe`, and `kbintake.ico` are staged under `%LOCALAPPDATA%\Programs\kbintake`.
-- Explorer registry entries point at `kbintakew.exe explorer run-import`.
-- Manual prompts confirm success, duplicate, and failure toasts.
-- Manual prompts confirm Explorer imports do not show a console window.
+- `kbintake.exe`, `kbintakew.exe`, and `kbintake.ico` are staged under `%LOCALAPPDATA%\Programs\kbintake`
+- Explorer registry entries point at `kbintakew.exe explorer run-import`
+- manual prompts confirm success, duplicate, and failure toasts
+- manual prompts confirm Explorer imports do not show a console window
 
-From an elevated Administrator PowerShell session:
+## Service Mode Smoke Check
+
+Run from an elevated Administrator PowerShell session:
 
 ```powershell
 .\scripts\validate-service-mode.ps1
@@ -48,88 +85,68 @@ From an elevated Administrator PowerShell session:
 
 Expected result:
 
-- The `KBIntake` service installs, starts, stops, and uninstalls.
-- A queued import is processed automatically by the service.
-- `%TEMP%\kbintake-service-check\logs\service.log` is created.
+- `KBIntake` service installs, starts, stops, and uninstalls
+- a queued import is processed automatically by the service
+- `%TEMP%\kbintake-service-check\logs\service.log*` is created
+- post-uninstall status is `not installed`
 
-## CLI Validation
+Manual item still pending:
 
-Use a temporary test directory that is not an important vault:
+- reboot-resume validation for service mode
+
+## Winget Manifest Check
+
+Run from the repository root:
 
 ```powershell
-$sample = New-Item -ItemType Directory -Force "$env:TEMP\kbintake-release-sample"
-Set-Content "$sample\note.md" "release smoke test"
-.\target\release\kbintake.exe doctor
-.\target\release\kbintake.exe config-show
-.\target\release\kbintake.exe import "$sample\note.md"
-.\target\release\kbintake.exe jobs list
-.\target\release\kbintake.exe agent
-.\target\release\kbintake.exe jobs list
-.\target\release\kbintake.exe import --process "$sample\note.md"
+winget validate --manifest .\installer\winget\1.0.0
 ```
 
 Expected result:
 
-- `doctor --fix` prints config, database, default target, and `Schema version: 3 (up to date)`.
-- `import` prints a batch ID, item count, and target.
-- `agent` reports at least one processed item.
-- `jobs list` shows the batch moving from queued/running to success.
-- `import --process` queues and processes work in one command.
-- The copied file exists under the configured target vault.
-
-## Explorer Registration Validation
-
-Install the release executable to a stable per-user path:
-
-```powershell
-New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
-Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
-Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
-& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor
+```text
+Manifest validation succeeded.
 ```
 
-Register and verify:
+Local manifest install requires this setting to be enabled by an administrator:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer install
-reg query "HKCU\Software\Classes\*\shell\KBIntake\command"
-reg query "HKCU\Software\Classes\Directory\shell\KBIntake\command"
-reg query "HKCU\Software\Classes\*\shell\KBIntake" /v Icon
-reg query "HKCU\Software\Classes\Directory\shell\KBIntake" /v Icon
+winget settings --enable LocalManifestFiles
 ```
 
-Manual Explorer smoke test:
+Then test:
 
-- Right-click a regular file and choose the KBIntake action.
-- Right-click a directory and choose the KBIntake action.
-- Run `kbintake.exe jobs list` to confirm the right-click imports completed or queued as expected.
+```powershell
+winget install --manifest .\installer\winget\1.0.0 --silent --accept-source-agreements --accept-package-agreements
+```
 
 ## Rollback
 
-Remove context-menu entries:
+Remove Explorer entries:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer uninstall
+kbintake explorer uninstall
 ```
 
-Verify the keys are gone:
+Remove the Windows Service if installed:
 
 ```powershell
-reg query "HKCU\Software\Classes\*\shell\KBIntake"
-reg query "HKCU\Software\Classes\Directory\shell\KBIntake"
+kbintake service stop
+kbintake service uninstall
 ```
 
-Remove the installed executable if needed:
+Uninstall KBIntake from Windows Settings or run:
 
 ```powershell
-Remove-Item "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
+& "$env:LOCALAPPDATA\Programs\kbintake\Uninstall.exe"
 ```
 
-Local runtime state is stored under `%LOCALAPPDATA%\kbintake` by default. Do not delete it unless you intentionally want to remove local config, queue state, manifests, and the default vault.
+Runtime state is stored under `%LOCALAPPDATA%\kbintake`. Do not delete it unless you intentionally want to remove config, queue history, manifests, logs, and the default vault.
 
 ## Known Limitations
 
-- Registry scripts still use editable placeholders when used manually; prefer `kbintake explorer install`.
-- Only a local-folder target is implemented.
+- Release binaries are not Authenticode signed yet.
+- Windows SmartScreen may warn on first run.
+- Public winget publication is not complete until #43 has a submitted `microsoft/winget-pkgs` PR.
+- Only local-folder targets are implemented.
 - Windows service reboot-resume validation is still manual.
-- Explorer toast/no-console validation requires manual confirmation.
