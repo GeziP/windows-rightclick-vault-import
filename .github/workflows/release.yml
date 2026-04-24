@@ -64,7 +64,7 @@ jobs:
         shell: pwsh
         working-directory: installer
         run: |
-          makensis .\kbintake.nsi
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" .\kbintake.nsi
           $hash = (Get-FileHash ..\dist\KBIntake-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           Add-Content ..\dist\SHA256SUMS.txt "KBIntake-Setup.exe  sha256=$hash"
 
