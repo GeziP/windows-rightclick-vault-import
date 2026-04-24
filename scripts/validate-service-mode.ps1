@@ -32,7 +32,7 @@ $appDataDir = Join-Path $env:TEMP "kbintake-service-check"
 $sampleDir = Join-Path $env:TEMP "kbintake-service-files"
 $sampleFile = Join-Path $sampleDir "svc-note.md"
 $vaultFile = Join-Path $appDataDir "vault\svc-note.md"
-$logFile = Join-Path $appDataDir "logs\service.log"
+$logDir = Join-Path $appDataDir "logs"
 
 $results = [ordered]@{
     Install = $false
@@ -99,12 +99,15 @@ Invoke-Step "Verify queued item processed" {
 }
 
 Invoke-Step "Verify service log exists" {
-    if (Test-Path $logFile) {
+    $logFile = Get-ChildItem $logDir -Filter "service.log*" -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($null -ne $logFile) {
         $results.LogExists = $true
-        Get-Content $logFile -Tail 20
+        Get-Content $logFile.FullName -Tail 20
     }
     else {
-        throw "Expected service log at $logFile"
+        throw "Expected a service.log* file under $logDir"
     }
 }
 
