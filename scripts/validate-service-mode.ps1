@@ -121,7 +121,13 @@ Invoke-Step "Uninstall service" {
     & $exe service uninstall
     $results.Uninstall = $true
     & $exe service status
-    sc.exe query KBIntake
+    $queryOutput = sc.exe query KBIntake 2>&1
+    if ($LASTEXITCODE -eq 1060) {
+        Write-Host "[OK] Service no longer installed"
+    }
+    else {
+        $queryOutput
+    }
 }
 
 Write-Host ""
