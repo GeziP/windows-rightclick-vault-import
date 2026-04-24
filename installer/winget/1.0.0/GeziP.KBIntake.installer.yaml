@@ -15,7 +15,7 @@ ReleaseDate: 2026-04-24
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/GeziP/windows-rightclick-vault-import/releases/download/v1.0.0/KBIntake-Setup.exe
-    InstallerSha256: 9CA3AC2D1861001DC0F1654BB9F1EBFF142EEE2D3F5E647E71B20EDBCFC2EA91
+    InstallerSha256: B977CE43D9F4D768EFB820925F2CD7894EBD03B64377006E8B1348843B6C5A98
     Scope: user
 ManifestType: installer
 ManifestVersion: 1.6.0
