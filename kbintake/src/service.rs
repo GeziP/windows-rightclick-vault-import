@@ -25,13 +25,17 @@ mod imp {
     use super::{Path, PathBuf, SERVICE_DISPLAY_NAME, SERVICE_NAME};
 
     const SERVICE_MISSING_ERROR: i32 = 1060;
+    const ACCESS_DENIED_ERROR: i32 = 5;
 
     windows_service::define_windows_service!(ffi_service_main, service_main);
 
     pub fn install(app_data_dir: &Path) -> Result<()> {
-        let service_manager = ServiceManager::local_computer(
-            None::<&str>,
-            ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
+        let service_manager = with_admin_hint(
+            ServiceManager::local_computer(
+                None::<&str>,
+                ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE,
+            ),
+            "install the Windows service",
         )?;
         let executable_path =
             std::env::current_exe().context("failed to resolve current executable path")?;
@@ -53,9 +57,12 @@ mod imp {
             account_password: None,
         };
 
-        let service = service_manager.create_service(
-            &service_info,
-            ServiceAccess::QUERY_STATUS | ServiceAccess::CHANGE_CONFIG,
+        let service = with_admin_hint(
+            service_manager.create_service(
+                &service_info,
+                ServiceAccess::QUERY_STATUS | ServiceAccess::CHANGE_CONFIG,
+            ),
+            "create the Windows service",
         )?;
         service.set_description(
             "Background KBIntake queue worker that processes queued imports continuously.",
@@ -69,46 +76,64 @@ mod imp {
     }
 
     pub fn start() -> Result<()> {
-        let service_manager =
-            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
-        let service = service_manager.open_service(
-            SERVICE_NAME,
-            ServiceAccess::START | ServiceAccess::QUERY_STATUS,
+        let service_manager = with_admin_hint(
+            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT),
+            "connect to the Windows Service Control Manager",
         )?;
-        service.start::<std::ffi::OsString>(&[])?;
+        let service = with_admin_hint(
+            service_manager.open_service(
+                SERVICE_NAME,
+                ServiceAccess::START | ServiceAccess::QUERY_STATUS,
+            ),
+            "start the Windows service",
+        )?;
+        with_admin_hint(
+            service.start::<std::ffi::OsString>(&[]),
+            "start the Windows service",
+        )?;
         wait_for_state(&service, ServiceState::Running, Duration::from_secs(15))?;
         println!("Service '{}' started.", SERVICE_NAME);
         Ok(())
     }
 
     pub fn stop() -> Result<()> {
-        let service_manager =
-            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
-        let service = service_manager.open_service(
-            SERVICE_NAME,
-            ServiceAccess::STOP | ServiceAccess::QUERY_STATUS,
+        let service_manager = with_admin_hint(
+            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT),
+            "connect to the Windows Service Control Manager",
+        )?;
+        let service = with_admin_hint(
+            service_manager.open_service(
+                SERVICE_NAME,
+                ServiceAccess::STOP | ServiceAccess::QUERY_STATUS,
+            ),
+            "stop the Windows service",
         )?;
         if service.query_status()?.current_state == ServiceState::Stopped {
             println!("Service '{}' is already stopped.", SERVICE_NAME);
             return Ok(());
         }
-        service.stop()?;
+        with_admin_hint(service.stop(), "stop the Windows service")?;
         wait_for_state(&service, ServiceState::Stopped, Duration::from_secs(30))?;
         println!("Service '{}' stopped.", SERVICE_NAME);
         Ok(())
     }
 
     pub fn uninstall() -> Result<()> {
-        let service_manager =
-            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
-        let service = service_manager.open_service(
-            SERVICE_NAME,
-            ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE,
+        let service_manager = with_admin_hint(
+            ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT),
+            "connect to the Windows Service Control Manager",
+        )?;
+        let service = with_admin_hint(
+            service_manager.open_service(
+                SERVICE_NAME,
+                ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE,
+            ),
+            "remove the Windows service",
         )?;
 
-        service.delete()?;
+        with_admin_hint(service.delete(), "remove the Windows service")?;
         if service.query_status()?.current_state != ServiceState::Stopped {
-            service.stop()?;
+            with_admin_hint(service.stop(), "stop the Windows service")?;
             wait_for_state(&service, ServiceState::Stopped, Duration::from_secs(30))?;
         }
         println!("Service '{}' removed.", SERVICE_NAME);
@@ -241,6 +266,26 @@ mod imp {
             windows_service::Error::Winapi(source)
                 if source.raw_os_error() == Some(SERVICE_MISSING_ERROR)
         )
+    }
+
+    fn is_access_denied_error(err: &windows_service::Error) -> bool {
+        matches!(
+            err,
+            windows_service::Error::Winapi(source)
+                if source.raw_os_error() == Some(ACCESS_DENIED_ERROR)
+        )
+    }
+
+    fn with_admin_hint<T>(result: windows_service::Result<T>, action: &str) -> Result<T> {
+        result.map_err(|err| {
+            if is_access_denied_error(&err) {
+                anyhow::anyhow!(
+                    "failed to {action}: access denied. Re-run the command from an elevated Administrator shell."
+                )
+            } else {
+                err.into()
+            }
+        })
     }
 
     fn service_status(

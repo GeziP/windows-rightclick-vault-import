@@ -21,6 +21,9 @@ app_data_dir = "C:\\Users\\<user>\\AppData\\Local\\kbintake"
 max_file_size_mb = 512
 inject_frontmatter = true
 
+[agent]
+poll_interval_secs = 5
+
 [[targets]]
 target_id = "default"
 name = "default"
@@ -96,6 +99,28 @@ kbintake targets set-default archive
 kbintake targets rename archive references
 kbintake targets remove references
 ```
+
+## `[agent]`
+
+### `poll_interval_secs`
+
+- Type: integer
+- Default: `5`
+
+When KBIntake is running in Windows Service mode, this controls how long the background worker waits between queue polls when no work is available.
+
+Useful commands:
+
+```powershell
+kbintake service install
+kbintake service start
+kbintake service status
+```
+
+Notes:
+
+- Service management currently requires an elevated Administrator PowerShell session.
+- SQLite WAL mode is enabled automatically while KBIntake is running so CLI reads can coexist with background processing.
 
 ## `[[routing]]`
 

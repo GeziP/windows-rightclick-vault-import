@@ -66,6 +66,11 @@ kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only
 kbintake explorer uninstall
 kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
 kbintake agent
+kbintake service install
+kbintake service start
+kbintake service stop
+kbintake service uninstall
+kbintake service status
 kbintake jobs list [--status <status>] [--limit <n>] [--json] [--table]
 kbintake jobs show <batch-id> [--json] [--table]
 kbintake jobs retry <batch-id>
@@ -86,6 +91,7 @@ The main settings are:
 - target list and default target
 - `[import].max_file_size_mb`
 - `[import].inject_frontmatter`
+- `[agent].poll_interval_secs`
 - `[[routing]]` extension rules
 
 Full reference:
@@ -116,6 +122,7 @@ Useful fixes:
 - Wrong vault target: `kbintake config set-target <path>`
 - Missing Explorer menu: `kbintake explorer install`
 - Schema mismatch after upgrades: `kbintake doctor --migrate`
+- Service install/start access denied: open an elevated Administrator PowerShell before running `kbintake service install`
 - PATH not updated: restart PowerShell, or add `%LOCALAPPDATA%\Programs\kbintake` to your user PATH
 
 ## Build From Source

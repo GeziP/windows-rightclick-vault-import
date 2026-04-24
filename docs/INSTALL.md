@@ -18,6 +18,7 @@ The installer places KBIntake in:
 It also:
 
 - installs `kbintake.exe`
+- installs `kbintakew.exe`
 - installs `kbintake.ico`
 - adds the install directory to your user PATH
 - registers Explorer context-menu entries
@@ -50,6 +51,23 @@ Terminal path:
 ```powershell
 kbintake import --process C:\path\to\note.md
 kbintake jobs list
+```
+
+## Optional Background Service
+
+If you want queued imports processed automatically in the background, open an elevated Administrator PowerShell and run:
+
+```powershell
+kbintake service install
+kbintake service start
+kbintake service status
+```
+
+To stop and remove it later:
+
+```powershell
+kbintake service stop
+kbintake service uninstall
 ```
 
 ## Install From Source
@@ -103,3 +121,8 @@ If KBIntake reports target problems:
 kbintake doctor
 kbintake doctor --fix
 ```
+
+If `kbintake service install` reports access denied:
+
+- open PowerShell as Administrator
+- then run the service command again

@@ -102,8 +102,7 @@ Local runtime state is stored under `%LOCALAPPDATA%\kbintake` by default. Do not
 
 ## Known Limitations
 
-- The agent is still a one-shot queue drain command, not a long-running Windows service.
 - Registry scripts still use editable placeholders when used manually; prefer `kbintake explorer install`.
 - Only a local-folder target is implemented.
-- The service-mode work is not implemented yet.
+- Windows service mode still needs elevated SCM validation and reboot-resume validation.
 - Explorer validation is manual.
