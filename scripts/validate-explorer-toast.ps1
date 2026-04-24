@@ -64,6 +64,13 @@ Invoke-Step "Register Explorer context menu against kbintakew.exe" {
     & (Join-Path $installDir "kbintake.exe") explorer install `
         --exe-path (Join-Path $installDir "kbintakew.exe") `
         --icon-path (Join-Path $installDir "kbintake.ico")
+
+    $escapedAppDataDir = $appDataDir.Replace('"', '\"')
+    $escapedGuiExe = (Join-Path $installDir "kbintakew.exe").Replace('"', '\"')
+    $command = "`"$escapedGuiExe`" --app-data-dir `"$escapedAppDataDir`" explorer run-import `"%1`""
+    reg.exe add "HKCU\Software\Classes\*\shell\KBIntake\command" /ve /d $command /f
+    reg.exe add "HKCU\Software\Classes\Directory\shell\KBIntake\command" /ve /d $command /f
+    reg query "HKCU\Software\Classes\*\shell\KBIntake\command"
 }
 
 Invoke-Step "Create sample files" {
@@ -94,14 +101,14 @@ $duplicateNoConsole = Read-YesNo "Did note2.md import without a visible console 
 $duplicateToast = Read-YesNo "Did a duplicate-related toast appear for note2.md?"
 
 Invoke-Step "Trigger a failure toast through kbintakew.exe" {
-    & (Join-Path $installDir "kbintakew.exe") explorer run-import $missing
+    & (Join-Path $installDir "kbintakew.exe") --app-data-dir $appDataDir explorer run-import $missing
     Start-Sleep -Seconds 2
 }
 $failureToast = Read-YesNo "Did a failure toast appear for the missing file case?"
 
 Write-Host ""
 Write-Host "Current jobs list:" -ForegroundColor Cyan
-& (Join-Path $installDir "kbintake.exe") jobs list
+& (Join-Path $installDir "kbintake.exe") --app-data-dir $appDataDir jobs list
 
 Write-Host ""
 Write-Host "Summary" -ForegroundColor Green
