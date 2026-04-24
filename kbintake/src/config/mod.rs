@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub app_data_dir: PathBuf,
     pub targets: Vec<Target>,
     pub import: ImportConfig,
+    #[serde(default)]
+    pub agent: AgentConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routing: Vec<RoutingRule>,
 }
@@ -22,6 +24,12 @@ pub struct ImportConfig {
     pub inject_frontmatter: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AgentConfig {
+    #[serde(default = "default_poll_interval_secs")]
+    pub poll_interval_secs: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RoutingRule {
     pub extensions: Vec<String>,
@@ -30,13 +38,7 @@ pub struct RoutingRule {
 
 impl AppConfig {
     pub fn load_or_init() -> Result<Self> {
-        let app_data_dir = std::env::var_os("KBINTAKE_APP_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                dirs::data_local_dir()
-                    .unwrap_or_else(|| PathBuf::from("."))
-                    .join("kbintake")
-            });
+        let app_data_dir = default_app_data_dir();
         Self::load_or_init_in(app_data_dir)
     }
 
@@ -59,6 +61,9 @@ impl AppConfig {
             import: ImportConfig {
                 max_file_size_mb: 512,
                 inject_frontmatter: true,
+            },
+            agent: AgentConfig {
+                poll_interval_secs: default_poll_interval_secs(),
             },
             routing: Vec::new(),
         };
@@ -207,6 +212,20 @@ impl AppConfig {
 
 fn default_inject_frontmatter() -> bool {
     true
+}
+
+pub fn default_app_data_dir() -> PathBuf {
+    std::env::var_os("KBINTAKE_APP_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::data_local_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("kbintake")
+        })
+}
+
+fn default_poll_interval_secs() -> u64 {
+    5
 }
 
 fn ensure_target_active(target: &Target) -> Result<()> {

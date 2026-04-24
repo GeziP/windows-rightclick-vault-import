@@ -1,0 +1,105 @@
+# KBIntake Install Guide
+
+## Recommended Install
+
+Use this path if you want KBIntake available from Explorer and PowerShell without building Rust code yourself.
+
+1. Open the project's GitHub Releases page.
+2. Download `KBIntake-Setup.exe`.
+3. Run the installer.
+4. Right-click a file in Explorer and choose the KBIntake action.
+
+The installer places KBIntake in:
+
+```text
+%LOCALAPPDATA%\Programs\kbintake
+```
+
+It also:
+
+- installs `kbintake.exe`
+- installs `kbintake.ico`
+- adds the install directory to your user PATH
+- registers Explorer context-menu entries
+- writes an uninstall entry in Windows settings
+
+## First Run Check
+
+Open PowerShell and run:
+
+```powershell
+kbintake doctor --fix
+```
+
+That creates any missing local directories and reports whether the database, target directory, Explorer menu, and PATH look healthy.
+
+## First Import
+
+Explorer path:
+
+1. Right-click a file.
+2. Choose the KBIntake action.
+3. Open PowerShell and run:
+
+```powershell
+kbintake jobs list
+```
+
+Terminal path:
+
+```powershell
+kbintake import --process C:\path\to\note.md
+kbintake jobs list
+```
+
+## Install From Source
+
+If you are developing KBIntake or want a local build:
+
+```powershell
+cd kbintake
+cargo build --release
+```
+
+Copy it into a stable per-user location:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Programs\kbintake"
+Copy-Item .\target\release\kbintake.exe "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" -Force
+Copy-Item .\assets\kbintake.ico "$env:LOCALAPPDATA\Programs\kbintake\kbintake.ico" -Force
+& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" doctor --fix
+& "$env:LOCALAPPDATA\Programs\kbintake\kbintake.exe" explorer install
+```
+
+## Uninstall
+
+If KBIntake was installed through the installer, remove it from Windows Settings like any other app.
+
+Manual cleanup path:
+
+```powershell
+kbintake explorer uninstall
+Remove-Item "$env:LOCALAPPDATA\Programs\kbintake" -Recurse -Force
+```
+
+Runtime state is stored separately under `%LOCALAPPDATA%\kbintake`. Leave that directory alone unless you intentionally want to remove config, queue history, manifests, and the default vault.
+
+## Troubleshooting
+
+If `kbintake` is not recognized:
+
+- open a new PowerShell window
+- or add `%LOCALAPPDATA%\Programs\kbintake` to your user PATH manually
+
+If the Explorer menu is missing:
+
+```powershell
+kbintake explorer install
+```
+
+If KBIntake reports target problems:
+
+```powershell
+kbintake doctor
+kbintake doctor --fix
+```

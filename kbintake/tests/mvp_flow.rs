@@ -55,7 +55,13 @@ fn bootstrap_initializes_database_schema_idempotently() {
     let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
     let conn = app.open_conn().unwrap();
 
-    for table in ["batches", "items", "manifest_records", "events"] {
+    for table in [
+        "schema_migrations",
+        "batches",
+        "items",
+        "manifest_records",
+        "events",
+    ] {
         assert_eq!(sqlite_object_count(&conn, "table", table), 1);
     }
     for index in [
@@ -64,10 +70,15 @@ fn bootstrap_initializes_database_schema_idempotently() {
         "idx_items_batch",
         "idx_items_status_created_at",
         "idx_items_target_hash",
+        "idx_events_entity_created_at",
     ] {
         assert_eq!(sqlite_object_count(&conn, "index", index), 1);
     }
     kbintake::db::validate_schema(&conn).unwrap();
+    assert_eq!(
+        kbintake::db::current_schema_version(&conn).unwrap(),
+        kbintake::db::latest_schema_version()
+    );
 
     let batch_count: i64 = conn
         .query_row(
@@ -969,6 +980,7 @@ fn cli_doctor_fix_creates_missing_target_and_reports_checks() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[OK] Config file"));
     assert!(stdout.contains("[OK] Database schema"));
+    assert!(stdout.contains("Schema version: 3 (up to date)"));
     assert!(stdout.contains("[OK] Target directory"));
     assert!(app_data_dir.join("vault").exists());
 }
@@ -997,6 +1009,20 @@ fn cli_doctor_warns_for_missing_routing_target() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[WARN] Routing"));
     assert!(stdout.contains("missing target 'missing'"));
+}
+
+#[test]
+fn cli_doctor_migrate_flag_reports_schema_version() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["doctor", "--migrate", "--fix"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Schema version: 3 (up to date)"));
 }
 
 #[test]

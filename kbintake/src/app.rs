@@ -15,6 +15,13 @@ impl App {
         Self::bootstrap_with_config(config)
     }
 
+    pub fn bootstrap_at(app_data_dir: Option<std::path::PathBuf>) -> Result<Self> {
+        match app_data_dir {
+            Some(app_data_dir) => Self::bootstrap_in(app_data_dir),
+            None => Self::bootstrap(),
+        }
+    }
+
     pub fn bootstrap_in(app_data_dir: impl Into<std::path::PathBuf>) -> Result<Self> {
         let app_data_dir = app_data_dir.into();
         let config = AppConfig::load_or_init_in(app_data_dir.clone()).with_context(|| {
@@ -44,7 +51,10 @@ impl App {
     }
 
     pub fn open_conn(&self) -> Result<Connection> {
-        Connection::open(&self.db_path)
-            .with_context(|| format!("failed to open database {}", self.db_path.display()))
+        let conn = Connection::open(&self.db_path)
+            .with_context(|| format!("failed to open database {}", self.db_path.display()))?;
+        conn.pragma_update(None, "journal_mode", "WAL")
+            .context("failed to enable WAL mode")?;
+        Ok(conn)
     }
 }

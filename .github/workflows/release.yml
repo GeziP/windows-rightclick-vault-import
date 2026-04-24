@@ -39,16 +39,21 @@ jobs:
         run: cargo test --locked
 
       - name: Build release binary
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+        run: cargo build --release --locked --bins --target x86_64-pc-windows-msvc
 
       - name: Stage release assets
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ..\dist | Out-Null
           Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintake.exe ..\dist\kbintake.exe -Force
+          Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintakew.exe ..\dist\kbintakew.exe -Force
           Copy-Item .\assets\kbintake.ico ..\dist\kbintake.ico -Force
           $hash = (Get-FileHash ..\dist\kbintake.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "kbintake.exe  sha256=$hash" | Set-Content ..\dist\SHA256SUMS.txt -Encoding utf8
+          $guiHash = (Get-FileHash ..\dist\kbintakew.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            "kbintake.exe  sha256=$hash"
+            "kbintakew.exe  sha256=$guiHash"
+          ) | Set-Content ..\dist\SHA256SUMS.txt -Encoding utf8
 
       - name: Install NSIS
         shell: pwsh
@@ -57,11 +62,11 @@ jobs:
 
       - name: Build installer
         shell: pwsh
-        working-directory: .
+        working-directory: installer
         run: |
-          makensis .\installer\kbintake.nsi
-          $hash = (Get-FileHash .\dist\KBIntake-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          Add-Content .\dist\SHA256SUMS.txt "KBIntake-Setup.exe  sha256=$hash"
+          makensis .\kbintake.nsi
+          $hash = (Get-FileHash ..\dist\KBIntake-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content ..\dist\SHA256SUMS.txt "KBIntake-Setup.exe  sha256=$hash"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -69,6 +74,7 @@ jobs:
           files: |
             dist/KBIntake-Setup.exe
             dist/kbintake.exe
+            dist/kbintakew.exe
             dist/kbintake.ico
             dist/SHA256SUMS.txt
           body_path: CHANGELOG.md

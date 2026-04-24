@@ -9,32 +9,7 @@ use crate::queue::state_machine;
 pub fn drain_queue(app: &App) -> Result<()> {
     let mut processed = 0usize;
 
-    loop {
-        let next = {
-            let conn = app.open_conn()?;
-            let repo = Repository::new(&conn);
-            repo.next_queued_item()?
-        };
-
-        let Some(item) = next else {
-            break;
-        };
-
-        {
-            let conn = app.open_conn()?;
-            let repo = Repository::new(&conn);
-            repo.update_batch_status(&item.batch_id, state_machine::STATUS_RUNNING)?;
-        }
-
-        let batch_id = item.batch_id.clone();
-        worker::process_item(app, item)?;
-
-        {
-            let conn = app.open_conn()?;
-            let repo = Repository::new(&conn);
-            repo.refresh_batch_status(&batch_id)?;
-        }
-
+    while process_next_item(app)? {
         processed += 1;
     }
 
@@ -43,15 +18,44 @@ pub fn drain_queue(app: &App) -> Result<()> {
     Ok(())
 }
 
+pub fn process_next_item(app: &App) -> Result<bool> {
+    let next = {
+        let conn = app.open_conn()?;
+        let repo = Repository::new(&conn);
+        repo.next_queued_item()?
+    };
+
+    let Some(item) = next else {
+        return Ok(false);
+    };
+
+    {
+        let conn = app.open_conn()?;
+        let repo = Repository::new(&conn);
+        repo.update_batch_status(&item.batch_id, state_machine::STATUS_RUNNING)?;
+    }
+
+    let batch_id = item.batch_id.clone();
+    worker::process_item(app, item)?;
+
+    {
+        let conn = app.open_conn()?;
+        let repo = Repository::new(&conn);
+        repo.refresh_batch_status(&batch_id)?;
+    }
+
+    Ok(true)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use rusqlite::Connection;
 
-    use super::drain_queue;
+    use super::{drain_queue, process_next_item};
     use crate::app::App;
-    use crate::config::{AppConfig, ImportConfig};
+    use crate::config::{AgentConfig, AppConfig, ImportConfig};
     use crate::db;
     use crate::domain::{BatchJob, ItemJob, Target};
     use crate::queue::repository::Repository;
@@ -72,6 +76,9 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                },
+                agent: AgentConfig {
+                    poll_interval_secs: 5,
                 },
                 routing: Vec::new(),
             },
@@ -112,6 +119,14 @@ mod tests {
                 .unwrap();
         }
         batch_id
+    }
+
+    #[test]
+    fn process_next_item_returns_false_when_queue_is_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = test_app(&temp);
+
+        assert!(!process_next_item(&app).unwrap());
     }
 
     #[test]

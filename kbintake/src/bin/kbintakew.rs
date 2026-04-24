@@ -1,8 +1,12 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::process::ExitCode;
 
 use anyhow::Error;
 use clap::Parser;
-use kbintake::cli::{Cli, Commands, JobCommands, ServiceCommands, TargetCommands};
+use kbintake::cli::{
+    Cli, Commands, ExplorerCommands, JobCommands, ServiceCommands, TargetCommands,
+};
 use kbintake::{agent, app, cli, exit_codes, logging};
 
 fn main() -> ExitCode {
@@ -63,6 +67,14 @@ fn main() -> ExitCode {
             .and_then(|app| cli::handle_vault(&app, command))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Vault, err)),
+        Commands::Explorer {
+            command: ExplorerCommands::RunImport { queue_only, paths },
+        } => app::App::bootstrap_at(app_data_dir)
+            .and_then(|app| cli::handle_explorer_run_import(&app, queue_only, paths))
+            .map_err(|err| {
+                cli::handle_explorer_run_import_error(&err);
+                (CommandKind::Explorer, err)
+            }),
         Commands::Explorer { command } => cli::handle_explorer(command)
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Explorer, err)),

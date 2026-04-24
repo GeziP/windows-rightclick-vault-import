@@ -27,7 +27,9 @@ pub struct MenuRegistration {
 }
 
 pub fn default_install_options(queue_only: bool) -> Result<InstallOptions> {
-    let exe_path = std::env::current_exe().context("failed to resolve current executable path")?;
+    let current_exe =
+        std::env::current_exe().context("failed to resolve current executable path")?;
+    let exe_path = discover_gui_exe_next_to_exe(&current_exe).unwrap_or(current_exe);
     let icon_path = discover_icon_next_to_exe(&exe_path);
     Ok(InstallOptions {
         exe_path,
@@ -57,9 +59,9 @@ pub fn build_registrations(options: &InstallOptions) -> Vec<MenuRegistration> {
 }
 
 pub fn build_import_command(exe_path: &Path, process: bool) -> String {
-    let process_arg = if process { " --process" } else { "" };
+    let queue_only_arg = if process { "" } else { " --queue-only" };
     format!(
-        "\"{}\" import{process_arg} \"%1\"",
+        "\"{}\" explorer run-import{queue_only_arg} \"%1\"",
         escape_command_path(exe_path)
     )
 }
@@ -67,6 +69,15 @@ pub fn build_import_command(exe_path: &Path, process: bool) -> String {
 pub fn discover_icon_next_to_exe(exe_path: &Path) -> Option<PathBuf> {
     let icon_path = exe_path.with_file_name("kbintake.ico");
     icon_path.exists().then_some(icon_path)
+}
+
+pub fn discover_gui_exe_next_to_exe(exe_path: &Path) -> Option<PathBuf> {
+    let gui_path = gui_exe_path_next_to_exe(exe_path);
+    gui_path.exists().then_some(gui_path)
+}
+
+pub fn gui_exe_path_next_to_exe(exe_path: &Path) -> PathBuf {
+    exe_path.with_file_name("kbintakew.exe")
 }
 
 fn escape_command_path(path: &Path) -> String {
@@ -161,21 +172,28 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        build_import_command, build_registrations, InstallOptions, DIR_MENU_KEY, FILE_MENU_KEY,
+        build_import_command, build_registrations, gui_exe_path_next_to_exe, InstallOptions,
+        DIR_MENU_KEY, FILE_MENU_KEY,
     };
 
     #[test]
     fn import_command_processes_by_default() {
-        let command = build_import_command(&PathBuf::from(r"C:\Tools\kbintake.exe"), true);
+        let command = build_import_command(&PathBuf::from(r"C:\Tools\kbintakew.exe"), true);
 
-        assert_eq!(command, r#""C:\Tools\kbintake.exe" import --process "%1""#);
+        assert_eq!(
+            command,
+            r#""C:\Tools\kbintakew.exe" explorer run-import "%1""#
+        );
     }
 
     #[test]
     fn import_command_can_queue_only() {
-        let command = build_import_command(&PathBuf::from(r"C:\Tools\kbintake.exe"), false);
+        let command = build_import_command(&PathBuf::from(r"C:\Tools\kbintakew.exe"), false);
 
-        assert_eq!(command, r#""C:\Tools\kbintake.exe" import "%1""#);
+        assert_eq!(
+            command,
+            r#""C:\Tools\kbintakew.exe" explorer run-import --queue-only "%1""#
+        );
     }
 
     #[test]
@@ -194,5 +212,12 @@ mod tests {
         assert!(registrations
             .iter()
             .all(|registration| registration.icon_path == options.icon_path));
+    }
+
+    #[test]
+    fn gui_exe_lookup_switches_to_kbintakew_name() {
+        let path = gui_exe_path_next_to_exe(&PathBuf::from(r"C:\Tools\kbintake.exe"));
+
+        assert_eq!(path, PathBuf::from(r"C:\Tools\kbintakew.exe"));
     }
 }

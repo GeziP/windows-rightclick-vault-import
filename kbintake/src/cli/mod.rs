@@ -10,6 +10,7 @@ use crate::app::App;
 use crate::config::{self, AppConfig};
 use crate::domain::{BatchJob, DomainEvent, ItemJob};
 use crate::exit_codes;
+use crate::notify::ToastContent;
 use crate::processor::scanner;
 use crate::queue::repository::Repository;
 
@@ -17,6 +18,8 @@ use crate::queue::repository::Repository;
 #[command(name = "kbintake")]
 #[command(about = "Windows knowledge-base intake agent")]
 pub struct Cli {
+    #[arg(long, global = true, hide = true)]
+    pub app_data_dir: Option<PathBuf>,
     #[command(subcommand)]
     pub command: Commands,
 }
@@ -55,9 +58,18 @@ pub enum Commands {
         #[command(subcommand)]
         command: ExplorerCommands,
     },
+    Service {
+        #[command(subcommand)]
+        command: ServiceCommands,
+    },
     Doctor {
         #[arg(long, help = "Apply safe automatic fixes")]
         fix: bool,
+        #[arg(
+            long,
+            help = "Apply pending database migrations before reporting status"
+        )]
+        migrate: bool,
     },
     ConfigShow,
 }
@@ -171,12 +183,38 @@ pub enum ExplorerCommands {
     },
     #[command(about = "Remove Windows Explorer right-click menu entries")]
     Uninstall,
+    #[command(hide = true)]
+    RunImport {
+        #[arg(long, help = "Queue right-click imports without immediate processing")]
+        queue_only: bool,
+        paths: Vec<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ServiceCommands {
+    Install,
+    Start,
+    Stop,
+    Uninstall,
+    Status,
+    #[command(hide = true)]
+    Run,
 }
 
 #[derive(Debug, Clone)]
 pub struct ImportOutcome {
     pub batch_id: String,
     pub item_count: usize,
+    pub target_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplorerBatchSummary {
+    pub batch_id: String,
+    pub imported: usize,
+    pub duplicates: usize,
+    pub failed: usize,
     pub target_name: String,
 }
 
@@ -664,7 +702,7 @@ fn parse_batch_status_filter(status: Option<String>) -> Result<Option<String>> {
     anyhow::bail!("unsupported status filter: {status}");
 }
 
-pub fn handle_doctor(app: &App, fix: bool) -> Result<i32> {
+pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
     let mut failed = false;
     println!("Config dir: {}", app.config.app_data_dir.display());
     println!("Database: {}", app.db_path.display());
@@ -681,17 +719,35 @@ pub fn handle_doctor(app: &App, fix: bool) -> Result<i32> {
         );
     }
 
-    match app
-        .open_conn()
-        .and_then(|conn| crate::db::validate_schema(&conn))
-    {
-        Ok(()) => print_doctor_ok("Database schema", "ok"),
+    match app.open_conn() {
+        Ok(conn) => {
+            if migrate {
+                crate::db::apply_pending_migrations(&conn)?;
+            }
+            match crate::db::validate_schema(&conn) {
+                Ok(()) => {
+                    let version = crate::db::current_schema_version(&conn)?;
+                    print_doctor_ok(
+                        "Database schema",
+                        &format!("Schema version: {} (up to date)", version),
+                    );
+                }
+                Err(err) => {
+                    failed = true;
+                    print_doctor_fail(
+                        "Database schema",
+                        &err.to_string(),
+                        "Check that the app data directory is writable; run: kbintake doctor --migrate",
+                    );
+                }
+            }
+        }
         Err(err) => {
             failed = true;
             print_doctor_fail(
                 "Database schema",
                 &err.to_string(),
-                "Check that the app data directory is writable; future migration support will add: kbintake doctor --migrate",
+                "Check that the app data directory is writable; run: kbintake doctor --migrate",
             );
         }
     }
@@ -993,7 +1049,112 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
             println!("Removed Explorer context-menu entries");
             Ok(())
         }
+        ExplorerCommands::RunImport { .. } => {
+            anyhow::bail!("explorer run-import is only intended for the hidden GUI launcher")
+        }
     }
+}
+
+pub fn handle_explorer_run_import(app: &App, queue_only: bool, paths: Vec<PathBuf>) -> Result<i32> {
+    let outcome = handle_import(app, None, paths)?;
+    if queue_only {
+        let toast = ToastContent {
+            title: "KBIntake".to_string(),
+            line1: format!(
+                "Queued {} item(s) for {}.",
+                outcome.item_count, outcome.target_name
+            ),
+            line2: Some(format!("Batch {}", outcome.batch_id)),
+        };
+        show_explorer_toast(&toast);
+        return Ok(exit_codes::SUCCESS);
+    }
+
+    scheduler::drain_queue(app)?;
+    let summary = summarize_batch(app, &outcome.batch_id)?;
+    let toast = toast_for_batch(&summary);
+    show_explorer_toast(&toast);
+
+    if summary.failed > 0 && summary.imported == 0 && summary.duplicates == 0 {
+        Ok(exit_codes::GENERAL_ERROR)
+    } else if summary.failed > 0 {
+        Ok(exit_codes::PARTIAL_SUCCESS)
+    } else {
+        Ok(exit_codes::SUCCESS)
+    }
+}
+
+pub fn handle_explorer_run_import_error(err: &anyhow::Error) {
+    let toast = ToastContent {
+        title: "KBIntake".to_string(),
+        line1: "Import failed before processing finished.".to_string(),
+        line2: Some(err.to_string()),
+    };
+    let icon_path = std::env::current_exe()
+        .ok()
+        .and_then(|exe_path| crate::explorer::discover_icon_next_to_exe(&exe_path));
+    let _ = crate::notify::show_toast(&toast, icon_path.as_deref());
+}
+
+fn summarize_batch(app: &App, batch_id: &str) -> Result<ExplorerBatchSummary> {
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+    let batch = repo.get_batch(batch_id)?;
+    let items = repo.list_items_by_batch(batch_id)?;
+    let mut imported = 0usize;
+    let mut duplicates = 0usize;
+    let mut failed = 0usize;
+    for item in items {
+        match item.status.as_str() {
+            crate::queue::state_machine::STATUS_SUCCESS => imported += 1,
+            crate::queue::state_machine::STATUS_DUPLICATE => duplicates += 1,
+            crate::queue::state_machine::STATUS_FAILED => failed += 1,
+            _ => {}
+        }
+    }
+    let target_name = if batch.target_id == "mixed" {
+        "mixed".to_string()
+    } else {
+        app.config.target_any_by_id(&batch.target_id)?.name
+    };
+    Ok(ExplorerBatchSummary {
+        batch_id: batch.batch_id,
+        imported,
+        duplicates,
+        failed,
+        target_name,
+    })
+}
+
+fn toast_for_batch(summary: &ExplorerBatchSummary) -> ToastContent {
+    if summary.failed == 0 {
+        let detail = if summary.duplicates > 0 {
+            format!("{} duplicate skipped.", summary.duplicates)
+        } else {
+            "No duplicates skipped.".to_string()
+        };
+        ToastContent {
+            title: "KBIntake".to_string(),
+            line1: format!(
+                "Imported {} file(s) into {}.",
+                summary.imported, summary.target_name
+            ),
+            line2: Some(detail),
+        }
+    } else {
+        ToastContent {
+            title: "KBIntake".to_string(),
+            line1: format!("Import finished with {} failure(s).", summary.failed),
+            line2: Some(format!("Run: kbintake jobs retry {}", summary.batch_id)),
+        }
+    }
+}
+
+fn show_explorer_toast(toast: &ToastContent) {
+    let icon_path = std::env::current_exe()
+        .ok()
+        .and_then(|exe_path| crate::explorer::discover_icon_next_to_exe(&exe_path));
+    let _ = crate::notify::show_toast(toast, icon_path.as_deref());
 }
 
 #[derive(Debug, Serialize)]
@@ -1120,10 +1281,11 @@ mod tests {
 
     use super::{
         format_event_line, format_job_show_row, handle_config, handle_import,
-        handle_import_command, handle_targets, ConfigCommands, TargetCommands,
+        handle_import_command, handle_targets, toast_for_batch, ConfigCommands,
+        ExplorerBatchSummary, TargetCommands,
     };
     use crate::app::App;
-    use crate::config::{AppConfig, ImportConfig};
+    use crate::config::{AgentConfig, AppConfig, ImportConfig};
     use crate::db;
     use crate::domain::{DomainEvent, ItemJob, Target};
     use crate::exit_codes;
@@ -1144,6 +1306,9 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                },
+                agent: AgentConfig {
+                    poll_interval_secs: 5,
                 },
                 routing: Vec::new(),
             },
@@ -1562,5 +1727,38 @@ mod tests {
 
         assert!(line.contains("item.failed"));
         assert!(line.contains("\"error_code\":\"E_TEST\""));
+    }
+
+    #[test]
+    fn explorer_success_toast_mentions_import_and_duplicates() {
+        let toast = toast_for_batch(&ExplorerBatchSummary {
+            batch_id: "batch-1".to_string(),
+            imported: 3,
+            duplicates: 1,
+            failed: 0,
+            target_name: "notes".to_string(),
+        });
+
+        assert_eq!(toast.title, "KBIntake");
+        assert!(toast.line1.contains("Imported 3 file(s) into notes."));
+        assert_eq!(toast.line2.as_deref(), Some("1 duplicate skipped."));
+    }
+
+    #[test]
+    fn explorer_failure_toast_includes_retry_hint() {
+        let toast = toast_for_batch(&ExplorerBatchSummary {
+            batch_id: "batch-9".to_string(),
+            imported: 1,
+            duplicates: 0,
+            failed: 2,
+            target_name: "notes".to_string(),
+        });
+
+        assert_eq!(toast.title, "KBIntake");
+        assert!(toast.line1.contains("2 failure"));
+        assert_eq!(
+            toast.line2.as_deref(),
+            Some("Run: kbintake jobs retry batch-9")
+        );
     }
 }

@@ -43,7 +43,7 @@ Set-Content "$sample\note.md" "release smoke test"
 
 Expected result:
 
-- `doctor` prints config, database, default target, and `Schema: ok`.
+- `doctor --fix` prints config, database, default target, and `Schema version: 3 (up to date)`.
 - `import` prints a batch ID, item count, and target.
 - `agent` reports at least one processed item.
 - `jobs list` shows the batch moving from queued/running to success.
@@ -102,8 +102,8 @@ Local runtime state is stored under `%LOCALAPPDATA%\kbintake` by default. Do not
 
 ## Known Limitations
 
-- The agent is a one-shot queue drain command, not a long-running Windows service.
+- The agent is still a one-shot queue drain command, not a long-running Windows service.
 - Registry scripts still use editable placeholders when used manually; prefer `kbintake explorer install`.
 - Only a local-folder target is implemented.
-- There is no schema migration version table yet; schema changes are currently additive and idempotent.
+- The service-mode work is not implemented yet.
 - Explorer validation is manual.

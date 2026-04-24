@@ -1,4 +1,4 @@
-pub const SCHEMA: &str = r#"
+pub const MIGRATION_001_CORE: &str = r#"
 CREATE TABLE IF NOT EXISTS batches (
     batch_id TEXT PRIMARY KEY,
     source TEXT NOT NULL,
@@ -28,7 +28,9 @@ CREATE TABLE IF NOT EXISTS items (
     updated_at TEXT NOT NULL,
     FOREIGN KEY(batch_id) REFERENCES batches(batch_id)
 );
+"#;
 
+pub const MIGRATION_002_MANIFEST_AND_EVENTS: &str = r#"
 CREATE TABLE IF NOT EXISTS manifest_records (
     record_id TEXT PRIMARY KEY,
     item_id TEXT NOT NULL,
@@ -65,4 +67,9 @@ CREATE TABLE IF NOT EXISTS events (
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+"#;
+
+pub const MIGRATION_003_EVENT_LOOKUP_INDEX: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_events_entity_created_at
+ON events(entity_type, entity_id, created_at);
 "#;

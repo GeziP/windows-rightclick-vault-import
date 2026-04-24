@@ -142,7 +142,7 @@ mod tests {
 
     use super::{preview_import, DryRunAction};
     use crate::app::App;
-    use crate::config::{AppConfig, ImportConfig};
+    use crate::config::{AgentConfig, AppConfig, ImportConfig};
     use crate::db;
     use crate::domain::{ManifestRecord, Target};
     use crate::queue::repository::Repository;
@@ -162,6 +162,9 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                },
+                agent: AgentConfig {
+                    poll_interval_secs: 5,
                 },
                 routing: Vec::new(),
             },

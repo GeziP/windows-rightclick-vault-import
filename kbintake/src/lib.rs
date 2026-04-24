@@ -8,5 +8,7 @@ pub mod domain;
 pub mod exit_codes;
 pub mod explorer;
 pub mod logging;
+pub mod notify;
 pub mod processor;
 pub mod queue;
+pub mod service;
