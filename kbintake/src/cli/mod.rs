@@ -17,6 +17,7 @@ use crate::queue::repository::Repository;
 #[derive(Parser, Debug)]
 #[command(name = "kbintake")]
 #[command(about = "Windows knowledge-base intake agent")]
+#[command(version)]
 pub struct Cli {
     #[arg(long, global = true, hide = true)]
     pub app_data_dir: Option<PathBuf>,
@@ -72,6 +73,7 @@ pub enum Commands {
         migrate: bool,
     },
     ConfigShow,
+    Version,
 }
 
 #[derive(Subcommand, Debug)]

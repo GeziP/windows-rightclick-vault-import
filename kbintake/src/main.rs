@@ -76,6 +76,10 @@ fn main() -> ExitCode {
             .and_then(|app| cli::handle_config_show(&app))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
+        Commands::Version => {
+            println!("kbintake {}", env!("CARGO_PKG_VERSION"));
+            Ok(exit_codes::SUCCESS)
+        }
     };
 
     match result {
