@@ -75,6 +75,11 @@ pub enum Commands {
         migrate: bool,
     },
     ConfigShow,
+    #[command(about = "Watch directories for new files and queue them for import")]
+    Watch {
+        #[arg(long, help = "Directory to watch; can be specified multiple times")]
+        path: Vec<PathBuf>,
+    },
     Version,
 }
 
@@ -1396,6 +1401,13 @@ fn format_timestamp(value: &str) -> String {
         .unwrap_or_else(|_| value.to_string())
 }
 
+/// Start the file watcher for the given paths (or config defaults).
+/// This is a long-running operation that does not return.
+pub fn handle_watch(app: &App, paths: Option<Vec<PathBuf>>) -> Result<i32> {
+    crate::agent::watcher::run_watcher(app, paths)
+        .map(|()| exit_codes::SUCCESS)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1436,6 +1448,7 @@ mod tests {
                 routing: Vec::new(),
                 templates: Vec::new(),
                 routing_rules: Vec::new(),
+                watch: Vec::new(),
             },
             db_path,
         }

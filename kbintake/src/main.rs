@@ -33,6 +33,12 @@ fn main() -> ExitCode {
             .and_then(|app| agent::run_agent(&app))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Agent, err)),
+        Commands::Watch { path } => app::App::bootstrap_at(app_data_dir)
+            .and_then(|app| {
+                let paths = if path.is_empty() { None } else { Some(path) };
+                cli::handle_watch(&app, paths)
+            })
+            .map_err(|err| (CommandKind::Watch, err)),
         Commands::Import {
             target,
             template,
@@ -92,6 +98,7 @@ fn main() -> ExitCode {
 #[derive(Debug, Clone, Copy)]
 enum CommandKind {
     Agent,
+    Watch,
     Import,
     Jobs(JobKind),
     Targets(TargetKind),

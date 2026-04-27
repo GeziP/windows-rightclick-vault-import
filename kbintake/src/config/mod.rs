@@ -19,6 +19,8 @@ pub struct AppConfig {
     pub templates: Vec<TemplateConfig>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routing_rules: Vec<RoutingRuleV2>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub watch: Vec<WatchConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +70,19 @@ pub struct RoutingRuleV2 {
     pub template: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchConfig {
+    pub path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(default = "default_debounce_secs")]
+    pub debounce_secs: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<StringList>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -151,6 +166,7 @@ impl AppConfig {
             routing: Vec::new(),
             templates: Vec::new(),
             routing_rules: Vec::new(),
+            watch: Vec::new(),
         };
 
         config.save()?;
@@ -624,6 +640,10 @@ pub fn default_app_data_dir() -> PathBuf {
 
 fn default_poll_interval_secs() -> u64 {
     5
+}
+
+fn default_debounce_secs() -> u64 {
+    2
 }
 
 fn ensure_target_active(target: &Target) -> Result<()> {

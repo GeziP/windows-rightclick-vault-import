@@ -83,6 +83,7 @@ mod tests {
                 routing: Vec::new(),
                 templates: Vec::new(),
                 routing_rules: Vec::new(),
+                watch: Vec::new(),
             },
             db_path,
         }
