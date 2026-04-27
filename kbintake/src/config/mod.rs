@@ -84,6 +84,12 @@ impl StringList {
             Self::Many(values) => values.iter().map(String::as_str).collect(),
         }
     }
+
+    pub fn matches_case_insensitive(&self, candidate: &str) -> bool {
+        self.values()
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(candidate))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -383,6 +389,105 @@ impl AppConfig {
 
         ConfigValidation { errors, warnings }
     }
+
+    pub fn template_for_path<'a>(
+        &'a self,
+        path: &std::path::Path,
+        source_size_bytes: u64,
+    ) -> Option<&'a TemplateConfig> {
+        if let Some(rule) = self
+            .routing_rules
+            .iter()
+            .find(|rule| routing_rule_matches(rule, path, source_size_bytes))
+        {
+            return self
+                .templates
+                .iter()
+                .find(|template| template.name == rule.template);
+        }
+
+        self.templates.first()
+    }
+}
+
+fn routing_rule_matches(
+    rule: &RoutingRuleV2,
+    path: &std::path::Path,
+    source_size_bytes: u64,
+) -> bool {
+    let file_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let file_ext = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let source_path = path.to_string_lossy().to_string();
+    let file_size_kb = source_size_bytes.div_ceil(1024);
+
+    if let Some(extension) = &rule.extension {
+        if !extension.matches_case_insensitive(&file_ext) {
+            return false;
+        }
+    }
+    if let Some(source_folder) = &rule.source_folder {
+        let normalized_rule = source_folder.replace('/', "\\").to_ascii_lowercase();
+        let normalized_path = source_path.to_ascii_lowercase();
+        if !wildcard_match(&normalized_rule, &normalized_path) {
+            return false;
+        }
+    }
+    if let Some(file_name_contains) = &rule.file_name_contains {
+        if !file_name
+            .to_ascii_lowercase()
+            .contains(&file_name_contains.to_ascii_lowercase())
+        {
+            return false;
+        }
+    }
+    if let Some(file_size_kb_gt) = rule.file_size_kb_gt {
+        if file_size_kb <= file_size_kb_gt {
+            return false;
+        }
+    }
+    if let Some(file_size_kb_lt) = rule.file_size_kb_lt {
+        if file_size_kb >= file_size_kb_lt {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern_chars = pattern.chars().collect::<Vec<_>>();
+    let text_chars = text.chars().collect::<Vec<_>>();
+    let (mut p, mut t) = (0usize, 0usize);
+    let (mut star_idx, mut match_idx) = (None, 0usize);
+
+    while t < text_chars.len() {
+        if p < pattern_chars.len() && (pattern_chars[p] == text_chars[t]) {
+            p += 1;
+            t += 1;
+        } else if p < pattern_chars.len() && pattern_chars[p] == '*' {
+            star_idx = Some(p);
+            match_idx = t;
+            p += 1;
+        } else if let Some(star) = star_idx {
+            p = star + 1;
+            match_idx += 1;
+            t = match_idx;
+        } else {
+            return false;
+        }
+    }
+
+    while p < pattern_chars.len() && pattern_chars[p] == '*' {
+        p += 1;
+    }
+
+    p == pattern_chars.len()
 }
 
 fn default_inject_frontmatter() -> bool {
@@ -456,7 +561,9 @@ pub fn validate_target_root(root_path: &std::path::Path) -> Result<()> {
 mod tests {
     use std::fs;
 
-    use super::{validate_target_root, AppConfig, RoutingRule, RoutingRuleV2, StringList};
+    use super::{
+        validate_target_root, AppConfig, RoutingRule, RoutingRuleV2, StringList, TemplateConfig,
+    };
 
     #[test]
     fn saves_and_reloads_updated_default_target() {
@@ -797,6 +904,92 @@ target = "archive"
             .errors
             .iter()
             .any(|error| error.contains("missing template")));
+    }
+
+    #[test]
+    fn template_for_path_prefers_first_matching_routing_rule() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.templates.push(TemplateConfig {
+            name: "default-template".to_string(),
+            base_template: None,
+            subfolder: None,
+            tags: Vec::new(),
+            frontmatter: toml::Table::new(),
+        });
+        config.templates.push(TemplateConfig {
+            name: "pdf-template".to_string(),
+            base_template: None,
+            subfolder: None,
+            tags: Vec::new(),
+            frontmatter: toml::Table::new(),
+        });
+        config.templates.push(TemplateConfig {
+            name: "meeting-template".to_string(),
+            base_template: None,
+            subfolder: None,
+            tags: Vec::new(),
+            frontmatter: toml::Table::new(),
+        });
+        config.routing_rules.push(RoutingRuleV2 {
+            extension: Some(StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "pdf-template".to_string(),
+            target: None,
+        });
+        config.routing_rules.push(RoutingRuleV2 {
+            extension: None,
+            source_folder: None,
+            file_name_contains: Some("meeting".to_string()),
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "meeting-template".to_string(),
+            target: None,
+        });
+
+        let template = config
+            .template_for_path(std::path::Path::new("team-meeting.pdf"), 10 * 1024)
+            .unwrap();
+
+        assert_eq!(template.name, "pdf-template");
+    }
+
+    #[test]
+    fn template_for_path_falls_back_to_first_template_without_match() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.templates.push(TemplateConfig {
+            name: "default-template".to_string(),
+            base_template: None,
+            subfolder: None,
+            tags: Vec::new(),
+            frontmatter: toml::Table::new(),
+        });
+        config.templates.push(TemplateConfig {
+            name: "large-image-template".to_string(),
+            base_template: None,
+            subfolder: None,
+            tags: Vec::new(),
+            frontmatter: toml::Table::new(),
+        });
+        config.routing_rules.push(RoutingRuleV2 {
+            extension: Some(StringList::One("png".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: Some(500),
+            file_size_kb_lt: None,
+            template: "large-image-template".to_string(),
+            target: None,
+        });
+
+        let template = config
+            .template_for_path(std::path::Path::new("tiny.png"), 10 * 1024)
+            .unwrap();
+
+        assert_eq!(template.name, "default-template");
     }
 
     #[test]
