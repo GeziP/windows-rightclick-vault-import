@@ -55,7 +55,7 @@ jobs:
             -Directory `
             -Filter "Microsoft.VC143.CRT" `
             -ErrorAction Stop |
-            Where-Object { $_.FullName -like "*VC\Redist\MSVC\*\x64\Microsoft.VC143.CRT" } |
+            Where-Object { $_.Parent -and $_.Parent.Name -eq "x64" } |
             Sort-Object FullName -Descending |
             Select-Object -First 1 -ExpandProperty FullName
           if (-not $crtDir) {
