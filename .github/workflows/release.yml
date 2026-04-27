@@ -45,9 +45,23 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ..\dist | Out-Null
+          New-Item -ItemType Directory -Force ..\dist\crt | Out-Null
           Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintake.exe ..\dist\kbintake.exe -Force
           Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintakew.exe ..\dist\kbintakew.exe -Force
           Copy-Item .\assets\kbintake.ico ..\dist\kbintake.ico -Force
+          $crtDir = Get-ChildItem `
+            -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio" `
+            -Recurse `
+            -Directory `
+            -Filter "Microsoft.VC143.CRT" `
+            -ErrorAction Stop |
+            Where-Object { $_.FullName -like "*VC\\Redist\\MSVC\\*\\x64\\Microsoft.VC143.CRT" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $crtDir) {
+            throw "Microsoft.VC143.CRT redistributable directory not found."
+          }
+          Copy-Item "$crtDir\\*.dll" ..\dist\crt -Force
           $hash = (Get-FileHash ..\dist\kbintake.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $guiHash = (Get-FileHash ..\dist\kbintakew.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           @(
