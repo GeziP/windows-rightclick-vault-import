@@ -96,6 +96,9 @@ Manual item still pending:
 
 ## Winget Manifest Check
 
+The winget installer manifest declares `Microsoft.VCRedist.2015+.x64` because the
+MSVC release binaries require `VCRUNTIME140.dll` on clean Windows installs.
+
 Run from the repository root:
 
 ```powershell
