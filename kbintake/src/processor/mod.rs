@@ -4,4 +4,5 @@ pub mod dry_run;
 pub mod frontmatter;
 pub mod hasher;
 pub mod scanner;
+pub mod template;
 pub mod validator;
