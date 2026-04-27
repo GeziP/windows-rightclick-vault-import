@@ -69,6 +69,7 @@ Implemented on branch `v2.0`:
 - dry-run template preview
 - template application during actual import
 - `routing_rules.target` wired into actual import and dry-run
+- route-hit visibility in dry-run, CLI output, and Explorer toast copy using the matched template name as the current rule label
 
 Covered by tests:
 
@@ -79,7 +80,6 @@ Covered by tests:
 
 Still open for `#58`:
 
-- route-hit toast text that surfaces the applied rule
 - Explorer/manual-template flow and "ignore rule" escape hatch
 - Watch Mode path using the same routing/template engine
 - any explicit Chinese-language error/output requirements not yet implemented

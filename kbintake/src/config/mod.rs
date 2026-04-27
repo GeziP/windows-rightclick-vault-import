@@ -98,6 +98,12 @@ pub struct ConfigValidation {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RouteSelection {
+    pub target: Target,
+    pub matched_rule_template: Option<String>,
+}
+
 impl ConfigValidation {
     pub fn is_valid(&self) -> bool {
         self.errors.is_empty()
@@ -178,14 +184,27 @@ impl AppConfig {
         path: &std::path::Path,
         source_size_bytes: u64,
     ) -> Result<Target> {
-        if let Some(target) = self
-            .first_matching_routing_rule(path, source_size_bytes)
-            .and_then(|rule| rule.target.as_deref())
-        {
-            return self.target_by_id(target);
-        }
+        Ok(self
+            .route_selection_for_path(path, source_size_bytes)?
+            .target)
+    }
 
-        self.target_for_path(path)
+    pub fn route_selection_for_path(
+        &self,
+        path: &std::path::Path,
+        source_size_bytes: u64,
+    ) -> Result<RouteSelection> {
+        let matched_rule = self.first_matching_routing_rule(path, source_size_bytes);
+        let target = if let Some(target) = matched_rule.and_then(|rule| rule.target.as_deref()) {
+            self.target_by_id(target)?
+        } else {
+            self.target_for_path(path)?
+        };
+
+        Ok(RouteSelection {
+            target,
+            matched_rule_template: matched_rule.map(|rule| rule.template.clone()),
+        })
     }
 
     pub fn routing_warnings(&self) -> Vec<String> {
@@ -1063,6 +1082,31 @@ target = "archive"
             .unwrap();
 
         assert_eq!(target.target_id, "archive");
+    }
+
+    #[test]
+    fn route_selection_returns_matched_v2_template_name() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.routing_rules.push(RoutingRuleV2 {
+            extension: Some(StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "research-paper".to_string(),
+            target: None,
+        });
+
+        let selection = config
+            .route_selection_for_path(std::path::Path::new("paper.pdf"), 3 * 1024)
+            .unwrap();
+
+        assert_eq!(selection.target.target_id, "default");
+        assert_eq!(
+            selection.matched_rule_template.as_deref(),
+            Some("research-paper")
+        );
     }
 
     #[test]

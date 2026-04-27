@@ -210,6 +210,7 @@ pub struct ImportOutcome {
     pub batch_id: String,
     pub item_count: usize,
     pub target_name: String,
+    pub routing_summary: RoutingSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,6 +220,13 @@ pub struct ExplorerBatchSummary {
     pub duplicates: usize,
     pub failed: usize,
     pub target_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoutingSummary {
+    None,
+    Single(String),
+    Multiple,
 }
 
 pub fn handle_import_command(
@@ -275,22 +283,25 @@ pub fn handle_import(
     let routed_files = files
         .into_iter()
         .map(|file| {
-            let target = match &explicit_target {
-                Some(target) => target.clone(),
+            let source_size_bytes = std::fs::metadata(&file)
+                .with_context(|| format!("failed to inspect {}", file.display()))?
+                .len();
+            let (target, matched_rule_template) = match &explicit_target {
+                Some(target) => (target.clone(), None),
                 None => {
-                    let source_size_bytes = std::fs::metadata(&file)
-                        .with_context(|| format!("failed to inspect {}", file.display()))?
-                        .len();
-                    app.config
-                        .target_for_path_with_size(&file, source_size_bytes)?
+                    let selection = app
+                        .config
+                        .route_selection_for_path(&file, source_size_bytes)?;
+                    (selection.target, selection.matched_rule_template)
                 }
             };
-            Ok((file, target))
+            Ok((file, target, matched_rule_template))
         })
         .collect::<Result<Vec<_>>>()?;
     let batch_target_id = common_target_id(&routed_files)
         .unwrap_or("mixed")
         .to_string();
+    let routing_summary = summarize_routing(&routed_files);
     let batch = BatchJob::new("cli", &batch_target_id, routed_files.len() as i64);
     repo.insert_batch(&batch)?;
     repo.insert_event(&DomainEvent::new(
@@ -305,7 +316,7 @@ pub fn handle_import(
     ))?;
 
     let mut count = 0usize;
-    for (file, target) in routed_files {
+    for (file, target, _) in routed_files {
         let item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
         repo.insert_item(&item)?;
         repo.insert_event(&DomainEvent::new(
@@ -330,19 +341,43 @@ pub fn handle_import(
         app.config.target_any_by_id(&batch_target_id)?.name
     };
     println!("Target: {}", target_name);
+    match &routing_summary {
+        RoutingSummary::Single(rule) => println!("Routing rule: {}", rule),
+        RoutingSummary::Multiple => println!("Routing rule: multiple"),
+        RoutingSummary::None => {}
+    }
     Ok(ImportOutcome {
         batch_id: batch.batch_id,
         item_count: count,
         target_name,
+        routing_summary,
     })
 }
 
-fn common_target_id(routed_files: &[(PathBuf, crate::domain::Target)]) -> Option<&str> {
+fn common_target_id(
+    routed_files: &[(PathBuf, crate::domain::Target, Option<String>)],
+) -> Option<&str> {
     let first = routed_files.first()?.1.target_id.as_str();
     routed_files
         .iter()
-        .all(|(_, target)| target.target_id == first)
+        .all(|(_, target, _)| target.target_id == first)
         .then_some(first)
+}
+
+fn summarize_routing(
+    routed_files: &[(PathBuf, crate::domain::Target, Option<String>)],
+) -> RoutingSummary {
+    let mut matched = routed_files
+        .iter()
+        .filter_map(|(_, _, template)| template.as_deref())
+        .collect::<Vec<_>>();
+    matched.sort_unstable();
+    matched.dedup();
+    match matched.as_slice() {
+        [] => RoutingSummary::None,
+        [single] => RoutingSummary::Single((*single).to_string()),
+        _ => RoutingSummary::Multiple,
+    }
 }
 
 pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
@@ -1091,10 +1126,7 @@ pub fn handle_explorer_run_import(app: &App, queue_only: bool, paths: Vec<PathBu
     if queue_only {
         let toast = ToastContent {
             title: "KBIntake".to_string(),
-            line1: format!(
-                "Queued {} item(s) for {}.",
-                outcome.item_count, outcome.target_name
-            ),
+            line1: queued_toast_line(&outcome),
             line2: Some(format!("Batch {}", outcome.batch_id)),
         };
         show_explorer_toast(&toast);
@@ -1103,7 +1135,7 @@ pub fn handle_explorer_run_import(app: &App, queue_only: bool, paths: Vec<PathBu
 
     scheduler::drain_queue(app)?;
     let summary = summarize_batch(app, &outcome.batch_id)?;
-    let toast = toast_for_batch(&summary);
+    let toast = toast_for_batch(&summary, &outcome.routing_summary);
     show_explorer_toast(&toast);
 
     if summary.failed > 0 && summary.imported == 0 && summary.duplicates == 0 {
@@ -1157,25 +1189,75 @@ fn summarize_batch(app: &App, batch_id: &str) -> Result<ExplorerBatchSummary> {
     })
 }
 
-fn toast_for_batch(summary: &ExplorerBatchSummary) -> ToastContent {
+fn queued_toast_line(outcome: &ImportOutcome) -> String {
+    match &outcome.routing_summary {
+        RoutingSummary::Single(rule) => format!(
+            "Queued {} item(s) for {} using rule {}.",
+            outcome.item_count, outcome.target_name, rule
+        ),
+        RoutingSummary::Multiple => format!(
+            "Queued {} item(s) for {} using multiple rules.",
+            outcome.item_count, outcome.target_name
+        ),
+        RoutingSummary::None => {
+            format!(
+                "Queued {} item(s) for {}.",
+                outcome.item_count, outcome.target_name
+            )
+        }
+    }
+}
+
+fn toast_for_batch(
+    summary: &ExplorerBatchSummary,
+    routing_summary: &RoutingSummary,
+) -> ToastContent {
     if summary.failed == 0 {
         let detail = if summary.duplicates > 0 {
             format!("{} duplicate skipped.", summary.duplicates)
         } else {
             "No duplicates skipped.".to_string()
         };
-        ToastContent {
-            title: "KBIntake".to_string(),
-            line1: format!(
+        let line1 = match routing_summary {
+            RoutingSummary::Single(rule) => format!(
+                "Imported {} file(s) into {} using rule {}.",
+                summary.imported, summary.target_name, rule
+            ),
+            RoutingSummary::Multiple => format!(
+                "Imported {} file(s) into {} using multiple rules.",
+                summary.imported, summary.target_name
+            ),
+            RoutingSummary::None => format!(
                 "Imported {} file(s) into {}.",
                 summary.imported, summary.target_name
             ),
+        };
+        ToastContent {
+            title: "KBIntake".to_string(),
+            line1,
             line2: Some(detail),
         }
     } else {
+        let line1 = match routing_summary {
+            RoutingSummary::Single(rule) => {
+                format!(
+                    "Import finished with {} failure(s) after rule {}.",
+                    summary.failed, rule
+                )
+            }
+            RoutingSummary::Multiple => {
+                format!(
+                    "Import finished with {} failure(s) after multiple rules.",
+                    summary.failed
+                )
+            }
+            RoutingSummary::None => {
+                format!("Import finished with {} failure(s).", summary.failed)
+            }
+        };
         ToastContent {
             title: "KBIntake".to_string(),
-            line1: format!("Import finished with {} failure(s).", summary.failed),
+            line1,
             line2: Some(format!("Run: kbintake jobs retry {}", summary.batch_id)),
         }
     }
@@ -1312,8 +1394,8 @@ mod tests {
 
     use super::{
         format_event_line, format_job_show_row, handle_config, handle_import,
-        handle_import_command, handle_targets, toast_for_batch, ConfigCommands,
-        ExplorerBatchSummary, TargetCommands,
+        handle_import_command, handle_targets, queued_toast_line, toast_for_batch, ConfigCommands,
+        ExplorerBatchSummary, RoutingSummary, TargetCommands,
     };
     use crate::app::App;
     use crate::config::{AgentConfig, AppConfig, ImportConfig};
@@ -1712,6 +1794,10 @@ mod tests {
         let batch = repo.get_batch(&outcome.batch_id).unwrap();
         let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
         assert_eq!(outcome.target_name, "archive");
+        assert_eq!(
+            outcome.routing_summary,
+            RoutingSummary::Single("pdf-template".to_string())
+        );
         assert_eq!(batch.target_id, "archive");
         assert_eq!(items[0].target_id, "archive");
     }
@@ -1742,6 +1828,7 @@ mod tests {
         let batch = repo.get_batch(&outcome.batch_id).unwrap();
         let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
         assert_eq!(outcome.target_name, "default");
+        assert_eq!(outcome.routing_summary, RoutingSummary::None);
         assert_eq!(batch.target_id, "default");
         assert_eq!(items[0].target_id, "default");
     }
@@ -1824,34 +1911,55 @@ mod tests {
 
     #[test]
     fn explorer_success_toast_mentions_import_and_duplicates() {
-        let toast = toast_for_batch(&ExplorerBatchSummary {
-            batch_id: "batch-1".to_string(),
-            imported: 3,
-            duplicates: 1,
-            failed: 0,
-            target_name: "notes".to_string(),
-        });
+        let toast = toast_for_batch(
+            &ExplorerBatchSummary {
+                batch_id: "batch-1".to_string(),
+                imported: 3,
+                duplicates: 1,
+                failed: 0,
+                target_name: "notes".to_string(),
+            },
+            &RoutingSummary::Single("research-paper".to_string()),
+        );
 
         assert_eq!(toast.title, "KBIntake");
-        assert!(toast.line1.contains("Imported 3 file(s) into notes."));
+        assert!(toast
+            .line1
+            .contains("Imported 3 file(s) into notes using rule research-paper."));
         assert_eq!(toast.line2.as_deref(), Some("1 duplicate skipped."));
     }
 
     #[test]
     fn explorer_failure_toast_includes_retry_hint() {
-        let toast = toast_for_batch(&ExplorerBatchSummary {
-            batch_id: "batch-9".to_string(),
-            imported: 1,
-            duplicates: 0,
-            failed: 2,
-            target_name: "notes".to_string(),
-        });
+        let toast = toast_for_batch(
+            &ExplorerBatchSummary {
+                batch_id: "batch-9".to_string(),
+                imported: 1,
+                duplicates: 0,
+                failed: 2,
+                target_name: "notes".to_string(),
+            },
+            &RoutingSummary::Multiple,
+        );
 
         assert_eq!(toast.title, "KBIntake");
         assert!(toast.line1.contains("2 failure"));
+        assert!(toast.line1.contains("multiple rules"));
         assert_eq!(
             toast.line2.as_deref(),
             Some("Run: kbintake jobs retry batch-9")
         );
+    }
+
+    #[test]
+    fn queued_toast_line_mentions_single_routing_rule() {
+        let line = queued_toast_line(&super::ImportOutcome {
+            batch_id: "batch-1".to_string(),
+            item_count: 2,
+            target_name: "notes".to_string(),
+            routing_summary: RoutingSummary::Single("research-paper".to_string()),
+        });
+
+        assert!(line.contains("Queued 2 item(s) for notes using rule research-paper."));
     }
 }
