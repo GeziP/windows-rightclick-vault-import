@@ -97,9 +97,37 @@ Implemented:
 
 Still open for `#62`:
 
-- Duplicate watcher detection (PID lock file)
 - Integration with Windows Service mode for auto-start
-- Toast notification on watch import completion
+
+### Phase 1 / Epic `#60` TUI settings
+
+Implemented:
+
+- `kbintake tui` — interactive terminal settings interface
+- Tabbed layout: Targets, Import settings, Watch configs, Templates
+- Keyboard shortcuts: q/Esc quit, 1-4 switch tabs, s save, a/r/d target management
+- Frontmatter toggle, language toggle, max file size adjust
+- All labels localized via `tr()`
+- `ratatui` + `crossterm` for cross-platform terminal rendering
+
+Still open for `#60`:
+
+- Full text input for adding new targets/paths (shows CLI hints)
+- More advanced editing of template frontmatter
+
+### Phase 1 / Epic `#63` Obsidian URI integration
+
+Implemented:
+
+- `kbintake obsidian open --vault <name> <note_path>` — opens note in Obsidian app
+- Cross-platform URI launch (cmd /start on Windows, xdg-open on Linux)
+- URL-encoded vault and file parameters
+- `urlencoding` crate for proper URI escaping
+
+Still open for `#63`:
+
+- Config-level `obsidian_vault` binding (per-target vault names)
+- Auto-open note after successful import (opt-in flag)
 
 ### Phase 1 / Epic `#61` zh-CN localization
 

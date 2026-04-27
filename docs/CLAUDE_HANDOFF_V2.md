@@ -152,9 +152,25 @@ Implemented:
 
 Still open in `#62`:
 
-- Duplicate watcher detection (PID lock file)
 - Integration with Windows Service mode for auto-start
-- Toast notification on watch import completion
+
+### Phase 1 / `#60` TUI settings
+
+Implemented:
+
+- `kbintake tui` — interactive terminal settings interface
+- Tabbed layout: Targets, Import, Watch, Templates
+- Keyboard shortcuts for navigation, save, target management
+- `ratatui` + `crossterm` dependencies
+- All labels localized
+
+### Phase 1 / `#63` Obsidian URI integration
+
+Implemented:
+
+- `kbintake obsidian open --vault <name> <note_path>`
+- Cross-platform URI launch
+- URL encoding via `urlencoding` crate
 
 ### Phase 1 / `#61` zh-CN localization
 
@@ -198,20 +214,18 @@ keys or the DLL to be signed.
 
 ### After that:
 
-- Watch Mode (`#62`) — **completed** (file system watcher)
-- TUI settings flow (`#60`) — not started
-- zh-CN localization (`#61`) — **completed**
-- Obsidian URI integration (`#63`) — not started
+- Windows Service integration for Watch Mode auto-start (`#62`)
+- TUI enhancements: full text input, template editing
+- Config-level `obsidian_vault` binding (`#63`)
 
 ## Validation State At Handoff
 
 Most recent successful validations:
 
 ```powershell
-cargo test --locked                            # 160 tests (108 unit + 52 integration)
-cargo clippy --package kbintake --all-targets --all-features --locked -- -D warnings
-cargo clippy --package kbintake-com --all-targets --all-features --locked -- -D warnings
-cargo build --release --locked                 # kbintake + kbintake-com
+cargo test --locked                            # 165 tests (113 unit + 52 integration)
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build --release                          # kbintake + kbintake-com
 ```
 
 ## Files Most Relevant To Continue From
@@ -222,9 +236,11 @@ cargo build --release --locked                 # kbintake + kbintake-com
 - `kbintake-com/src/server.rs` — DllGetClassObject / DllCanUnloadNow
 - `kbintake-com/src/reg.rs` — HKCR registration helpers
 - `kbintake/src/config/mod.rs` — ImportRoutingIntent + resolve_import_intent + WatchConfig + language
-- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template + Watch command + i18n
-- `kbintake/src/agent/watcher.rs` — Watch Mode implementation
+- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template + Watch/Obsidian/TUI commands + i18n
+- `kbintake/src/agent/watcher.rs` — Watch Mode with PID lock + toast notifications
 - `kbintake/src/i18n.rs` — zh-CN translation dictionary and tr() function
+- `kbintake/src/tui/mod.rs` — Interactive TUI settings
+- `kbintake/src/obsidian.rs` — Obsidian URI integration
 - `kbintake/src/processor/template.rs`
 - `kbintake/src/processor/dry_run.rs`
 - `kbintake/src/explorer/mod.rs`
