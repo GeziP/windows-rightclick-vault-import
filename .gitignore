@@ -1,4 +1,5 @@
 # Rust build output
+/target/
 /kbintake/target/
 /dist/
 
