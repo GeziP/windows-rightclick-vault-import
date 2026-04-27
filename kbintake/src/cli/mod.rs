@@ -277,7 +277,13 @@ pub fn handle_import(
         .map(|file| {
             let target = match &explicit_target {
                 Some(target) => target.clone(),
-                None => app.config.target_for_path(&file)?,
+                None => {
+                    let source_size_bytes = std::fs::metadata(&file)
+                        .with_context(|| format!("failed to inspect {}", file.display()))?
+                        .len();
+                    app.config
+                        .target_for_path_with_size(&file, source_size_bytes)?
+                }
             };
             Ok((file, target))
         })
@@ -1678,6 +1684,66 @@ mod tests {
         let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
         assert_eq!(batch.target_id, "archive");
         assert_eq!(items[0].target_id, "archive");
+    }
+
+    #[test]
+    fn import_uses_v2_routing_rule_target_without_explicit_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        app.config.routing_rules.push(crate::config::RoutingRuleV2 {
+            extension: Some(crate::config::StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "pdf-template".to_string(),
+            target: Some("archive".to_string()),
+        });
+        let source = temp.path().join("paper.pdf");
+        fs::write(&source, "pdf").unwrap();
+
+        let outcome = handle_import(&app, None, vec![source]).unwrap();
+
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let batch = repo.get_batch(&outcome.batch_id).unwrap();
+        let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+        assert_eq!(outcome.target_name, "archive");
+        assert_eq!(batch.target_id, "archive");
+        assert_eq!(items[0].target_id, "archive");
+    }
+
+    #[test]
+    fn explicit_target_overrides_v2_routing_rule_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        app.config.routing_rules.push(crate::config::RoutingRuleV2 {
+            extension: Some(crate::config::StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "pdf-template".to_string(),
+            target: Some("archive".to_string()),
+        });
+        let source = temp.path().join("paper.pdf");
+        fs::write(&source, "pdf").unwrap();
+
+        let outcome = handle_import(&app, Some("default".to_string()), vec![source]).unwrap();
+
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let batch = repo.get_batch(&outcome.batch_id).unwrap();
+        let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+        assert_eq!(outcome.target_name, "default");
+        assert_eq!(batch.target_id, "default");
+        assert_eq!(items[0].target_id, "default");
     }
 
     #[test]

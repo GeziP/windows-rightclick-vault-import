@@ -109,7 +109,7 @@ pub fn preview_import(
                 .with_context(|| format!("failed to hash {}", file.display()))?;
             let target = match &explicit_target {
                 Some(target) => target.clone(),
-                None => app.config.target_for_path(&file)?,
+                None => app.config.target_for_path_with_size(&file, size)?,
             };
             if deduper::find_duplicate_record(&repo, &target.target_id, &hash)?.is_some() {
                 rows.push(row(
@@ -287,6 +287,9 @@ mod tests {
     fn dry_run_json_preview_renders_template_destination_and_frontmatter() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = test_app(&temp);
+        app.config
+            .add_target("archive", temp.path().join("archive-vault"))
+            .unwrap();
         let mut frontmatter = Table::new();
         frontmatter.insert(
             "title".to_string(),
@@ -310,7 +313,7 @@ mod tests {
             file_size_kb_gt: None,
             file_size_kb_lt: None,
             template: "research-paper".to_string(),
-            target: None,
+            target: Some("archive".to_string()),
         });
         let source = temp.path().join("paper.pdf");
         fs::write(&source, "preview").unwrap();
@@ -328,6 +331,11 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("references"));
+        assert!(rows[0]
+            .destination
+            .as_deref()
+            .unwrap()
+            .contains("archive-vault"));
         assert_eq!(
             rows[0].frontmatter_preview.as_ref().unwrap()["title"].as_str(),
             Some("paper")

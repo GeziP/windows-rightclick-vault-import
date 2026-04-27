@@ -173,6 +173,21 @@ impl AppConfig {
         self.default_target()
     }
 
+    pub fn target_for_path_with_size(
+        &self,
+        path: &std::path::Path,
+        source_size_bytes: u64,
+    ) -> Result<Target> {
+        if let Some(target) = self
+            .first_matching_routing_rule(path, source_size_bytes)
+            .and_then(|rule| rule.target.as_deref())
+        {
+            return self.target_by_id(target);
+        }
+
+        self.target_for_path(path)
+    }
+
     pub fn routing_warnings(&self) -> Vec<String> {
         let mut warnings = self
             .routing
@@ -395,11 +410,7 @@ impl AppConfig {
         path: &std::path::Path,
         source_size_bytes: u64,
     ) -> Option<&'a TemplateConfig> {
-        if let Some(rule) = self
-            .routing_rules
-            .iter()
-            .find(|rule| routing_rule_matches(rule, path, source_size_bytes))
-        {
+        if let Some(rule) = self.first_matching_routing_rule(path, source_size_bytes) {
             return self
                 .templates
                 .iter()
@@ -407,6 +418,16 @@ impl AppConfig {
         }
 
         self.templates.first()
+    }
+
+    fn first_matching_routing_rule<'a>(
+        &'a self,
+        path: &std::path::Path,
+        source_size_bytes: u64,
+    ) -> Option<&'a RoutingRuleV2> {
+        self.routing_rules
+            .iter()
+            .find(|rule| routing_rule_matches(rule, path, source_size_bytes))
     }
 }
 
@@ -990,6 +1011,58 @@ target = "archive"
             .unwrap();
 
         assert_eq!(template.name, "default-template");
+    }
+
+    #[test]
+    fn target_for_path_with_size_prefers_matching_v2_rule_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        config.routing_rules.push(RoutingRuleV2 {
+            extension: Some(StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "missing-template-is-ignored-for-target-selection".to_string(),
+            target: Some("archive".to_string()),
+        });
+
+        let target = config
+            .target_for_path_with_size(std::path::Path::new("paper.pdf"), 3 * 1024)
+            .unwrap();
+
+        assert_eq!(target.target_id, "archive");
+    }
+
+    #[test]
+    fn target_for_path_with_size_falls_back_to_v1_routing_when_v2_rule_has_no_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        config.routing.push(RoutingRule {
+            extensions: vec![".pdf".to_string()],
+            target: "archive".to_string(),
+        });
+        config.routing_rules.push(RoutingRuleV2 {
+            extension: Some(StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "capture".to_string(),
+            target: None,
+        });
+
+        let target = config
+            .target_for_path_with_size(std::path::Path::new("paper.pdf"), 3 * 1024)
+            .unwrap();
+
+        assert_eq!(target.target_id, "archive");
     }
 
     #[test]

@@ -265,6 +265,70 @@ template = "capture"
 }
 
 #[test]
+fn v2_routing_rule_target_and_template_route_import_end_to_end() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    handle_targets(
+        &app,
+        TargetCommands::Add {
+            name: "archive".to_string(),
+            path: temp.path().join("archive-vault"),
+        },
+    )
+    .unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "paper"
+subfolder = "papers/{{imported_at_date}}"
+[templates.frontmatter]
+kind = "paper"
+
+[[routing_rules]]
+extension = "pdf"
+template = "paper"
+target = "archive"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("routed.pdf");
+    fs::write(&source, "pdf body").unwrap();
+
+    let outcome = handle_import(&app, None, vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.get_batch(&outcome.batch_id).unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    let expected_subfolder = chrono::Utc::now().format("papers/%Y-%m-%d").to_string();
+    let stored = temp
+        .path()
+        .join("archive-vault")
+        .join(expected_subfolder)
+        .join("routed.pdf");
+    let stored_display = stored.display().to_string();
+
+    assert_eq!(outcome.target_name, "archive");
+    assert_eq!(batch.target_id, "archive");
+    assert_eq!(item.target_id, "archive");
+    assert_eq!(item.status, state_machine::STATUS_SUCCESS);
+    assert!(stored.exists());
+    assert_eq!(item.stored_path.as_deref(), Some(stored_display.as_str()));
+    assert!(!app.config.targets[0].root_path.join("routed.pdf").exists());
+}
+
+#[test]
 fn non_markdown_import_is_not_modified() {
     let temp = tempfile::tempdir().unwrap();
     let app = bootstrap_temp_app(&temp);
