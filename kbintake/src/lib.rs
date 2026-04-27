@@ -7,6 +7,7 @@ pub mod db;
 pub mod domain;
 pub mod exit_codes;
 pub mod explorer;
+pub mod i18n;
 pub mod logging;
 pub mod notify;
 pub mod processor;

@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::adapter::local_folder::LocalFolderAdapter;
 use crate::app::App;
+use crate::i18n::tr;
 use crate::processor::{deduper, hasher, scanner, template, validator};
 use crate::queue::repository::Repository;
 
@@ -206,8 +207,8 @@ pub fn preview_import(
     Ok(rows)
 }
 
-pub fn print_table(rows: &[DryRunRow]) {
-    println!("Source Path\tTarget\tRule\tDestination\tAction");
+pub fn print_table(rows: &[DryRunRow], lang: &str) {
+    println!("{}", tr("cli.dry_run_table_header", lang));
     for row in rows {
         println!(
             "{}\t{}\t{}\t{}\t{}",
@@ -281,6 +282,7 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                    language: None,
                 },
                 agent: AgentConfig {
                     poll_interval_secs: 5,

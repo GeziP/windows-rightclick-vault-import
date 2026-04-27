@@ -10,6 +10,7 @@ use crate::app::App;
 use crate::config::{self, AppConfig};
 use crate::domain::{BatchJob, DomainEvent, ItemJob};
 use crate::exit_codes;
+use crate::i18n::tr;
 use crate::notify::ToastContent;
 use crate::processor::scanner;
 use crate::queue::repository::Repository;
@@ -251,10 +252,11 @@ pub fn handle_import_command(
 ) -> Result<i32> {
     if dry_run {
         let rows = crate::processor::dry_run::preview_import(app, target_id, template, paths)?;
+        let lang = app.config.language();
         if json {
             println!("{}", serde_json::to_string_pretty(&rows)?);
         } else {
-            crate::processor::dry_run::print_table(&rows);
+            crate::processor::dry_run::print_table(&rows, lang);
         }
         return Ok(exit_codes::SUCCESS);
     }
@@ -273,8 +275,9 @@ pub fn handle_import(
     template: Option<String>,
     paths: Vec<PathBuf>,
 ) -> Result<ImportOutcome> {
+    let lang = app.config.language();
     if paths.is_empty() {
-        anyhow::bail!("no input paths provided");
+        anyhow::bail!("{}", tr("cli.no_input_paths", lang));
     }
 
     let explicit_target = target_id;
@@ -285,7 +288,7 @@ pub fn handle_import(
         files.extend(discovered);
     }
     if files.is_empty() {
-        anyhow::bail!("no importable files found");
+        anyhow::bail!("{}", tr("cli.no_importable_files", lang));
     }
 
     let conn = app.open_conn()?;
@@ -340,17 +343,17 @@ pub fn handle_import(
     }
 
     info!(batch_id = %batch.batch_id, items = count, "batch queued");
-    println!("Queued batch: {}", batch.batch_id);
-    println!("Items queued: {}", count);
+    println!("{}", tr("cli.queued_batch", lang).replace("{}", &batch.batch_id));
+    println!("{}", tr("cli.items_queued", lang).replace("{}", &count.to_string()));
     let target_name = if batch_target_id == "mixed" {
         "mixed".to_string()
     } else {
         app.config.target_any_by_id(&batch_target_id)?.name
     };
-    println!("Target: {}", target_name);
+    println!("{}", tr("cli.target", lang).replace("{}", &target_name));
     match &routing_summary {
-        RoutingSummary::Single(rule) => println!("Routing rule: {}", rule),
-        RoutingSummary::Multiple => println!("Routing rule: multiple"),
+        RoutingSummary::Single(rule) => println!("{}", tr("cli.routing_rule_single", lang).replace("{}", rule)),
+        RoutingSummary::Multiple => println!("{}", tr("cli.routing_rule_multiple", lang)),
         RoutingSummary::None => {}
     }
     Ok(ImportOutcome {
@@ -390,6 +393,7 @@ fn summarize_routing(
 pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
+    let lang = app.config.language();
 
     match command {
         JobCommands::List {
@@ -398,8 +402,8 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             json,
             table,
         } => {
-            ensure_job_output_mode(json, table)?;
-            let status = parse_batch_status_filter(status)?;
+            ensure_job_output_mode(json, table, lang)?;
+            let status = parse_batch_status_filter(status, lang)?;
             let rows = repo.list_batches_filtered(limit as i64, status.as_deref())?;
             if json {
                 let out = rows
@@ -428,7 +432,7 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             json,
             table,
         } => {
-            ensure_job_output_mode(json, table)?;
+            ensure_job_output_mode(json, table, lang)?;
             let batch = repo.get_batch(&batch_id)?;
             let items = repo.list_items_by_batch(&batch_id)?;
             if json {
@@ -456,11 +460,11 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
                 return Ok(exit_codes::SUCCESS);
             }
 
-            println!("Batch: {}", batch.batch_id);
-            println!("Status: {}", batch.status);
-            println!("Source: {}", batch.source);
-            println!("Target: {}", batch.target_id);
-            println!("Items: {}", items.len());
+            println!("{}", tr("cli.batch", lang).replace("{}", &batch.batch_id));
+            println!("{}", tr("cli.status", lang).replace("{}", &batch.status));
+            println!("{}", tr("cli.source", lang).replace("{}", &batch.source));
+            println!("{}", tr("cli.target", lang).replace("{}", &batch.target_id));
+            println!("{}", tr("cli.items", lang).replace("{}", &items.len().to_string()));
             println!("{}", format_job_show_header());
             for item in items {
                 println!("{}", format_job_show_row(&item));
@@ -489,7 +493,7 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
                     }),
                 ))?;
             }
-            println!("Retried items: {retried}");
+            println!("{}", tr("cli.retried_items", lang).replace("{retried}", &retried.to_string()));
             Ok(exit_codes::SUCCESS)
         }
         JobCommands::Undo { batch_id, force } => {
@@ -497,7 +501,7 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             if batch.status == crate::queue::state_machine::STATUS_UNDONE
                 || batch.status == crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
             {
-                println!("Batch already undone: {}", batch.batch_id);
+                println!("{}", tr("cli.batch_already_undone", lang).replace("{}", &batch.batch_id));
                 return Ok(exit_codes::SUCCESS);
             }
             if batch.status == crate::queue::state_machine::STATUS_QUEUED
@@ -644,9 +648,9 @@ fn format_event_line(event: DomainEvent) -> String {
     )
 }
 
-fn ensure_job_output_mode(json: bool, table: bool) -> Result<()> {
+fn ensure_job_output_mode(json: bool, table: bool, lang: &str) -> Result<()> {
     if json && table {
-        anyhow::bail!("--json and --table cannot be used together");
+        anyhow::bail!("{}", tr("cli.json_table_mutual", lang));
     }
     Ok(())
 }
@@ -737,7 +741,7 @@ struct JobShowItemRow {
     error_message: Option<String>,
 }
 
-fn parse_batch_status_filter(status: Option<String>) -> Result<Option<String>> {
+fn parse_batch_status_filter(status: Option<String>, lang: &str) -> Result<Option<String>> {
     let Some(status) = status else {
         return Ok(None);
     };
@@ -755,23 +759,25 @@ fn parse_batch_status_filter(status: Option<String>) -> Result<Option<String>> {
         return Ok(Some(status));
     }
 
-    anyhow::bail!("unsupported status filter: {status}");
+    anyhow::bail!("{}", tr("cli.unsupported_status", lang).replace("{status}", &status));
 }
 
 pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
+    let lang = app.config.language();
     let mut failed = false;
-    println!("Config dir: {}", app.config.app_data_dir.display());
-    println!("Database: {}", app.db_path.display());
+    println!("{}", tr("cli.config_dir", lang).replace("{}", &app.config.app_data_dir.display().to_string()));
+    println!("{}", tr("cli.database", lang).replace("{}", &app.db_path.display().to_string()));
 
     let config_path = app.config.config_path();
     if config_path.exists() {
-        print_doctor_ok("Config file", &format!("{}", config_path.display()));
+        print_doctor_ok("Config file", &format!("{}", config_path.display()), lang);
     } else {
         failed = true;
         print_doctor_fail(
             "Config file",
             &format!("missing at {}", config_path.display()),
             "Run: kbintake doctor --fix",
+            lang,
         );
     }
 
@@ -786,6 +792,7 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                     print_doctor_ok(
                         "Database schema",
                         &format!("Schema version: {} (up to date)", version),
+                        lang,
                     );
                 }
                 Err(err) => {
@@ -794,6 +801,7 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                         "Database schema",
                         &err.to_string(),
                         "Check that the app data directory is writable; run: kbintake doctor --migrate",
+                        lang,
                     );
                 }
             }
@@ -804,6 +812,7 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                 "Database schema",
                 &err.to_string(),
                 "Check that the app data directory is writable; run: kbintake doctor --migrate",
+                lang,
             );
         }
     }
@@ -811,18 +820,24 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
     match app.config.default_target() {
         Ok(target) => {
             println!(
-                "Default target: {} ({})",
-                target.name,
-                target.root_path.display()
+                "{}",
+                tr("cli.default_target", lang)
+                    .replace("{}", &target.name)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang)
+                    .replace("{}", &target.root_path.display().to_string())
             );
             match check_target_root(&target.root_path, fix) {
                 Ok(()) => print_doctor_ok(
                     "Target directory",
                     &format!("{}", target.root_path.display()),
+                    lang,
                 ),
                 Err(DoctorFailure { message, hint }) => {
                     failed = true;
-                    print_doctor_fail("Target directory", &message, &hint);
+                    print_doctor_fail("Target directory", &message, &hint, lang);
                 }
             }
         }
@@ -832,17 +847,19 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                 "Default target",
                 &err.to_string(),
                 "Run: kbintake config set-target <path>",
+                lang,
             );
         }
     }
 
     if crate::explorer::is_installed().unwrap_or(false) {
-        print_doctor_ok("Explorer context menu", "registered");
+        print_doctor_ok("Explorer context menu", "registered", lang);
     } else {
         print_doctor_warn(
             "Explorer context menu",
             "not registered",
             "Run: kbintake explorer install",
+            lang,
         );
     }
 
@@ -851,16 +868,18 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
             "Routing",
             &warning,
             "Run: kbintake targets add <name> <path> or update config.toml",
+            lang,
         );
     }
 
     if command_on_path("kbintake") {
-        print_doctor_ok("PATH", "kbintake found");
+        print_doctor_ok("PATH", "kbintake found", lang);
     } else {
         print_doctor_warn(
             "PATH",
             "kbintake not found on PATH",
             "Add %LOCALAPPDATA%\\Programs\\kbintake to your PATH",
+            lang,
         );
     }
 
@@ -903,18 +922,33 @@ fn check_target_root(
     })
 }
 
-fn print_doctor_ok(check: &str, detail: &str) {
-    println!("[OK] {check}: {detail}");
+fn print_doctor_ok(check: &str, detail: &str, lang: &str) {
+    println!(
+        "{}",
+        tr("cli.ok_check", lang)
+            .replace("{check}", check)
+            .replace("{detail}", detail)
+    );
 }
 
-fn print_doctor_warn(check: &str, detail: &str, hint: &str) {
-    println!("[WARN] {check}: {detail}");
-    println!("  Hint: {hint}");
+fn print_doctor_warn(check: &str, detail: &str, hint: &str, lang: &str) {
+    println!(
+        "{}",
+        tr("cli.warn_check", lang)
+            .replace("{check}", check)
+            .replace("{detail}", detail)
+    );
+    println!("{}", tr("cli.warn_hint", lang).replace("{hint}", hint));
 }
 
-fn print_doctor_fail(check: &str, detail: &str, hint: &str) {
-    println!("[FAIL] {check}: {detail}");
-    println!("  Hint: {hint}");
+fn print_doctor_fail(check: &str, detail: &str, hint: &str, lang: &str) {
+    println!(
+        "{}",
+        tr("cli.fail_check", lang)
+            .replace("{check}", check)
+            .replace("{detail}", detail)
+    );
+    println!("{}", tr("cli.fail_hint", lang).replace("{hint}", hint));
 }
 
 fn command_on_path(command: &str) -> bool {
@@ -932,6 +966,7 @@ pub fn handle_config_show(app: &App) -> Result<()> {
 }
 
 pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
+    let lang = app.config.language();
     match command {
         ConfigCommands::Show => handle_config_show(app),
         ConfigCommands::Validate => {
@@ -940,7 +975,7 @@ pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
                 println!("[WARN] {warning}");
             }
             if validation.is_valid() {
-                println!("Config validation succeeded.");
+                println!("{}", tr("cli.config_valid", lang));
                 return Ok(());
             }
             for error in &validation.errors {
@@ -956,18 +991,19 @@ pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
             let target = config.set_default_target(name, path)?;
             config::validate_target_root(&target.root_path)?;
             config.save()?;
-            println!("Default target: {}", target.name);
-            println!("Path: {}", target.root_path.display());
+            println!("{}", tr("cli.default_target", lang).replace("{}", &target.name));
+            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
             Ok(())
         }
     }
 }
 
 pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
+    let lang = app.config.language();
     match command {
         TargetCommands::List { include_archived } => {
             if include_archived {
-                println!("default  target  name  status  path");
+                println!("{}", tr("cli.target_list_header", lang));
             }
             for (index, target) in app
                 .config
@@ -1002,10 +1038,10 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
         }
         TargetCommands::Show { target } => {
             let target = app.config.target_any_by_id(&target)?;
-            println!("Target: {}", target.target_id);
-            println!("Name: {}", target.name);
-            println!("Status: {}", target.status);
-            println!("Path: {}", target.root_path.display());
+            println!("{}", tr("cli.item_target", lang).replace("{}", &target.target_id));
+            println!("{}", tr("cli.item_name", lang).replace("{}", &target.name));
+            println!("{}", tr("cli.item_status", lang).replace("{}", &target.status));
+            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
             Ok(())
         }
         TargetCommands::Add { name, path } => {
@@ -1013,16 +1049,16 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             let target = config.add_target(name, path)?;
             config::validate_target_root(&target.root_path)?;
             config.save()?;
-            println!("Added target: {}", target.target_id);
-            println!("Path: {}", target.root_path.display());
+            println!("{}", tr("cli.added_target", lang).replace("{}", &target.target_id));
+            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
             Ok(())
         }
         TargetCommands::Rename { target, new_name } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.rename_target(&target, new_name)?;
             config.save()?;
-            println!("Renamed target: {}", target.target_id);
-            println!("Path: {}", target.root_path.display());
+            println!("{}", tr("cli.renamed_target", lang).replace("{}", &target.target_id));
+            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
             Ok(())
         }
         TargetCommands::Remove { target, force } => {
@@ -1046,15 +1082,15 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             }
             let removed = config.remove_target(&target)?;
             config.save()?;
-            println!("Archived target: {}", removed.target_id);
+            println!("{}", tr("cli.archived_target", lang).replace("{}", &removed.target_id));
             Ok(())
         }
         TargetCommands::SetDefault { target } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.set_default_target_by_id(&target)?;
             config.save()?;
-            println!("Default target: {}", target.target_id);
-            println!("Path: {}", target.root_path.display());
+            println!("{}", tr("cli.default_target", lang).replace("{}", &target.target_id));
+            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
             Ok(())
         }
     }
@@ -1137,11 +1173,12 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
 }
 
 pub fn handle_explorer_run_import(app: &App, queue_only: bool, template: Option<String>, paths: Vec<PathBuf>) -> Result<i32> {
+    let lang = app.config.language();
     let outcome = handle_import(app, None, template, paths)?;
     if queue_only {
         let toast = ToastContent {
-            title: "KBIntake".to_string(),
-            line1: queued_toast_line(&outcome),
+            title: tr("toast.title", lang),
+            line1: queued_toast_line(&outcome, lang),
             line2: Some(format!("Batch {}", outcome.batch_id)),
         };
         show_explorer_toast(&toast);
@@ -1150,7 +1187,7 @@ pub fn handle_explorer_run_import(app: &App, queue_only: bool, template: Option<
 
     scheduler::drain_queue(app)?;
     let summary = summarize_batch(app, &outcome.batch_id)?;
-    let toast = toast_for_batch(&summary, &outcome.routing_summary);
+    let toast = toast_for_batch(&summary, &outcome.routing_summary, lang);
     show_explorer_toast(&toast);
 
     if summary.failed > 0 && summary.imported == 0 && summary.duplicates == 0 {
@@ -1164,8 +1201,8 @@ pub fn handle_explorer_run_import(app: &App, queue_only: bool, template: Option<
 
 pub fn handle_explorer_run_import_error(err: &anyhow::Error) {
     let toast = ToastContent {
-        title: "KBIntake".to_string(),
-        line1: "Import failed before processing finished.".to_string(),
+        title: tr("toast.title", "en"),
+        line1: tr("toast.import_failed_before", "en"),
         line2: Some(err.to_string()),
     };
     let icon_path = std::env::current_exe()
@@ -1204,21 +1241,19 @@ fn summarize_batch(app: &App, batch_id: &str) -> Result<ExplorerBatchSummary> {
     })
 }
 
-fn queued_toast_line(outcome: &ImportOutcome) -> String {
+fn queued_toast_line(outcome: &ImportOutcome, lang: &str) -> String {
     match &outcome.routing_summary {
-        RoutingSummary::Single(rule) => format!(
-            "Queued {} item(s) for {} using rule {}.",
-            outcome.item_count, outcome.target_name, rule
-        ),
-        RoutingSummary::Multiple => format!(
-            "Queued {} item(s) for {} using multiple rules.",
-            outcome.item_count, outcome.target_name
-        ),
+        RoutingSummary::Single(rule) => tr("toast.queued_single", lang)
+            .replace("{count}", &outcome.item_count.to_string())
+            .replace("{target}", &outcome.target_name)
+            .replace("{rule}", rule),
+        RoutingSummary::Multiple => tr("toast.queued_multiple", lang)
+            .replace("{count}", &outcome.item_count.to_string())
+            .replace("{target}", &outcome.target_name),
         RoutingSummary::None => {
-            format!(
-                "Queued {} item(s) for {}.",
-                outcome.item_count, outcome.target_name
-            )
+            tr("toast.queued_none", lang)
+                .replace("{count}", &outcome.item_count.to_string())
+                .replace("{target}", &outcome.target_name)
         }
     }
 }
@@ -1226,54 +1261,45 @@ fn queued_toast_line(outcome: &ImportOutcome) -> String {
 fn toast_for_batch(
     summary: &ExplorerBatchSummary,
     routing_summary: &RoutingSummary,
+    lang: &str,
 ) -> ToastContent {
     if summary.failed == 0 {
         let detail = if summary.duplicates > 0 {
-            format!("{} duplicate skipped.", summary.duplicates)
+            tr("toast.duplicate_skipped", lang).replace("{count}", &summary.duplicates.to_string())
         } else {
-            "No duplicates skipped.".to_string()
+            tr("toast.no_duplicates", lang)
         };
         let line1 = match routing_summary {
-            RoutingSummary::Single(rule) => format!(
-                "Imported {} file(s) into {} using rule {}.",
-                summary.imported, summary.target_name, rule
-            ),
-            RoutingSummary::Multiple => format!(
-                "Imported {} file(s) into {} using multiple rules.",
-                summary.imported, summary.target_name
-            ),
-            RoutingSummary::None => format!(
-                "Imported {} file(s) into {}.",
-                summary.imported, summary.target_name
-            ),
+            RoutingSummary::Single(rule) => tr("toast.imported_single", lang)
+                .replace("{count}", &summary.imported.to_string())
+                .replace("{target}", &summary.target_name)
+                .replace("{rule}", rule),
+            RoutingSummary::Multiple => tr("toast.imported_multiple", lang)
+                .replace("{count}", &summary.imported.to_string())
+                .replace("{target}", &summary.target_name),
+            RoutingSummary::None => tr("toast.imported_none", lang)
+                .replace("{count}", &summary.imported.to_string())
+                .replace("{target}", &summary.target_name),
         };
         ToastContent {
-            title: "KBIntake".to_string(),
+            title: tr("toast.title", lang),
             line1,
             line2: Some(detail),
         }
     } else {
         let line1 = match routing_summary {
-            RoutingSummary::Single(rule) => {
-                format!(
-                    "Import finished with {} failure(s) after rule {}.",
-                    summary.failed, rule
-                )
-            }
-            RoutingSummary::Multiple => {
-                format!(
-                    "Import finished with {} failure(s) after multiple rules.",
-                    summary.failed
-                )
-            }
-            RoutingSummary::None => {
-                format!("Import finished with {} failure(s).", summary.failed)
-            }
+            RoutingSummary::Single(rule) => tr("toast.finish_failures_single", lang)
+                .replace("{count}", &summary.failed.to_string())
+                .replace("{rule}", rule),
+            RoutingSummary::Multiple => tr("toast.finish_failures_multiple", lang)
+                .replace("{count}", &summary.failed.to_string()),
+            RoutingSummary::None => tr("toast.finish_failures_none", lang)
+                .replace("{count}", &summary.failed.to_string()),
         };
         ToastContent {
-            title: "KBIntake".to_string(),
+            title: tr("toast.title", lang),
             line1,
-            line2: Some(format!("Run: kbintake jobs retry {}", summary.batch_id)),
+            line2: Some(tr("toast.retry_hint", lang).replace("{batch_id}", &summary.batch_id)),
         }
     }
 }
@@ -1308,6 +1334,7 @@ pub fn handle_vault(app: &App, command: VaultCommands) -> Result<()> {
 fn handle_vault_stats(app: &App, target_filter: Option<String>, json: bool) -> Result<()> {
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
+    let lang = app.config.language();
     let mut rows = Vec::new();
     let targets = if let Some(target_filter) = target_filter {
         let target = app.config.target_any_by_id(&target_filter)?;
@@ -1352,21 +1379,21 @@ fn handle_vault_stats(app: &App, target_filter: Option<String>, json: bool) -> R
     }
 
     if rows.is_empty() {
-        println!("No active targets configured.");
+        println!("{}", tr("cli.no_active_targets", lang));
         return Ok(());
     }
 
     for row in rows {
         let default_marker = if row.is_default { " (default)" } else { "" };
-        println!("Target: {}{}", row.name, default_marker);
-        println!("  Path:          {}", row.root_path);
-        println!("  Files imported: {}", row.files_imported);
-        println!("  Storage used:  {}", format_bytes(row.storage_bytes));
+        println!("{}", tr("cli.vault_target", lang).replace("{0}", &row.name).replace("{1}", default_marker));
+        println!("{}", tr("cli.vault_path", lang).replace("{}", &row.root_path));
+        println!("{}", tr("cli.vault_files", lang).replace("{}", &row.files_imported.to_string()));
+        println!("{}", tr("cli.vault_storage", lang).replace("{}", &format_bytes(row.storage_bytes)));
         println!(
             "  Duplicates:    {:.0}%  ({} skipped)",
             row.duplicate_percent, row.duplicate_count
         );
-        println!("  Failed:        {}", row.failed_count);
+        println!("{}", tr("cli.vault_failed", lang).replace("{}", &row.failed_count.to_string()));
         println!(
             "  Last import:   {}",
             row.last_import_at
@@ -1441,6 +1468,7 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                    language: None,
                 },
                 agent: AgentConfig {
                     poll_interval_secs: 5,
@@ -1943,6 +1971,7 @@ mod tests {
                 target_name: "notes".to_string(),
             },
             &RoutingSummary::Single("research-paper".to_string()),
+            "en",
         );
 
         assert_eq!(toast.title, "KBIntake");
@@ -1963,6 +1992,7 @@ mod tests {
                 target_name: "notes".to_string(),
             },
             &RoutingSummary::Multiple,
+            "en",
         );
 
         assert_eq!(toast.title, "KBIntake");
@@ -1976,12 +2006,15 @@ mod tests {
 
     #[test]
     fn queued_toast_line_mentions_single_routing_rule() {
-        let line = queued_toast_line(&super::ImportOutcome {
-            batch_id: "batch-1".to_string(),
-            item_count: 2,
-            target_name: "notes".to_string(),
-            routing_summary: RoutingSummary::Single("research-paper".to_string()),
-        });
+        let line = queued_toast_line(
+            &super::ImportOutcome {
+                batch_id: "batch-1".to_string(),
+                item_count: 2,
+                target_name: "notes".to_string(),
+                routing_summary: RoutingSummary::Single("research-paper".to_string()),
+            },
+            "en",
+        );
 
         assert!(line.contains("Queued 2 item(s) for notes using rule research-paper."));
     }

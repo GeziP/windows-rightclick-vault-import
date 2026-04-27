@@ -76,6 +76,7 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                    language: None,
                 },
                 agent: AgentConfig {
                     poll_interval_secs: 5,

@@ -28,6 +28,8 @@ pub struct ImportConfig {
     pub max_file_size_mb: u64,
     #[serde(default = "default_inject_frontmatter")]
     pub inject_frontmatter: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -159,6 +161,7 @@ impl AppConfig {
             import: ImportConfig {
                 max_file_size_mb: 512,
                 inject_frontmatter: true,
+                language: None,
             },
             agent: AgentConfig {
                 poll_interval_secs: default_poll_interval_secs(),
@@ -230,6 +233,11 @@ impl AppConfig {
             target,
             matched_rule_template: matched_rule.map(|rule| rule.template.clone()),
         })
+    }
+
+    /// Returns the configured UI language, defaulting to `"en"`.
+    pub fn language(&self) -> &str {
+        self.import.language.as_deref().unwrap_or("en")
     }
 
     /// Resolve full routing intent for an import, honouring explicit target and template overrides.
