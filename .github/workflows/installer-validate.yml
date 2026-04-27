@@ -1,0 +1,167 @@
+name: Installer Validation
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-installer:
+    name: Windows installer smoke test
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: kbintake
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kbintake -> target
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build release binaries
+        run: cargo build --release --locked --bins --target x86_64-pc-windows-msvc
+
+      - name: Stage installer assets
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ..\dist | Out-Null
+          New-Item -ItemType Directory -Force ..\dist\crt | Out-Null
+          Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintake.exe ..\dist\kbintake.exe -Force
+          Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintakew.exe ..\dist\kbintakew.exe -Force
+          Copy-Item .\assets\kbintake.ico ..\dist\kbintake.ico -Force
+          $crtDir = Get-ChildItem `
+            -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio" `
+            -Recurse `
+            -Directory `
+            -Filter "Microsoft.VC143.CRT" `
+            -ErrorAction Stop |
+            Where-Object { $_.FullName -like "*VC\\Redist\\MSVC\\*\\x64\\Microsoft.VC143.CRT" } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $crtDir) {
+            throw "Microsoft.VC143.CRT redistributable directory not found."
+          }
+          Copy-Item "$crtDir\\*.dll" ..\dist\crt -Force
+          $crtFiles = Get-ChildItem ..\dist\crt\*.dll
+          if ($crtFiles.Count -lt 3) {
+            throw "Expected staged CRT DLLs, found only $($crtFiles.Count)."
+          }
+          $crtFiles | Select-Object Name | Format-Table -AutoSize
+
+      - name: Install NSIS
+        shell: pwsh
+        working-directory: .
+        run: choco install nsis -y --no-progress
+
+      - name: Build installer
+        shell: pwsh
+        working-directory: installer
+        run: |
+          & "${env:ProgramFiles(x86)}\NSIS\makensis.exe" .\kbintake.nsi
+          if (-not (Test-Path ..\dist\KBIntake-Setup.exe)) {
+            throw "Installer was not produced."
+          }
+          Get-ChildItem ..\dist | Select-Object Name, Length | Format-Table -AutoSize
+
+      - name: Validate winget manifest
+        shell: pwsh
+        working-directory: .
+        run: |
+          $installerManifest = Get-ChildItem installer\winget -Recurse -Filter *.installer.yaml |
+            Sort-Object FullName |
+            Select-Object -Last 1 -ExpandProperty FullName
+          if (-not $installerManifest) {
+            throw "No winget installer manifest found."
+          }
+          winget validate --manifest $installerManifest
+
+      - name: Silent install smoke test
+        shell: pwsh
+        working-directory: .
+        run: |
+          $installer = Join-Path $PWD "dist\KBIntake-Setup.exe"
+          $process = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Silent installer failed with exit code $($process.ExitCode)."
+          }
+
+      - name: Verify installed files and commands
+        shell: pwsh
+        working-directory: .
+        run: |
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\kbintake"
+          $appDataDir = Join-Path $env:RUNNER_TEMP "kbintake-smoke"
+          $requiredFiles = @(
+            "kbintake.exe"
+            "kbintakew.exe"
+            "kbintake.ico"
+            "vcruntime140.dll"
+            "msvcp140.dll"
+          )
+          foreach ($file in $requiredFiles) {
+            $path = Join-Path $installDir $file
+            if (-not (Test-Path $path)) {
+              throw "Missing installed file: $path"
+            }
+          }
+
+          $version = & "$installDir\kbintake.exe" version
+          if ($LASTEXITCODE -ne 0) {
+            throw "kbintake version failed with exit code $LASTEXITCODE"
+          }
+          $version | Out-String | Write-Host
+
+          $env:KBINTAKE_APP_DATA_DIR = $appDataDir
+          $doctor = & "$installDir\kbintake.exe" doctor --fix
+          if ($LASTEXITCODE -ne 0) {
+            throw "kbintake doctor --fix failed with exit code $LASTEXITCODE"
+          }
+          $doctor | Out-String | Write-Host
+
+      - name: Silent uninstall smoke test
+        shell: pwsh
+        working-directory: .
+        run: |
+          $installDir = Join-Path $env:LOCALAPPDATA "Programs\kbintake"
+          $uninstaller = Join-Path $installDir "Uninstall.exe"
+          if (-not (Test-Path $uninstaller)) {
+            throw "Uninstaller not found at $uninstaller"
+          }
+          $process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Silent uninstall failed with exit code $($process.ExitCode)."
+          }
+          if (Test-Path $installDir) {
+            throw "Install directory still exists after uninstall: $installDir"
+          }
+
+      - name: Upload installer artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kbintake-installer-validation
+          path: |
+            dist/KBIntake-Setup.exe
+            dist/kbintake.exe
+            dist/kbintakew.exe
+            dist/kbintake.ico
+            dist/crt
