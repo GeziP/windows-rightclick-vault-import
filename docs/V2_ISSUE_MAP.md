@@ -113,20 +113,24 @@ Still open for `#59`:
 
 ### Phase 1 / Epic `#57` Windows 11 native context menu
 
-Started as a feasibility spike.
+COM DLL proof of concept completed.
 
 Implemented on branch `v2.0`:
 
 - hidden probe command: `kbintake explorer com-feasibility`
 - repo-local spike report: `docs/WIN11_COM_FEASIBILITY.md`
-- initial architecture verdict: proceed only with a separate DLL-oriented spike, not with the current exe-only registration model
+- initial architecture verdict: proceed only with a separate DLL-oriented spike
+- separate COM DLL crate (`kbintake-com/`):
+  - manual vtable `IExplorerCommand` implementation
+  - `IClassFactory` for COM instantiation
+  - `DllMain`, `DllGetClassObject`, `DllCanUnloadNow` exports
+  - HKCR registration/unregistration binary
+  - `Invoke` spawns `kbintake.exe import --process` in background
 
 Still required by Phase 1 tracker:
 
-- minimal Windows 11 DLL registration proof of concept
-- static command invocation proof
-- measured go / no-go decision on a real Windows 11 machine
-- fallback documentation if moved to v2.1
+- real install/uninstall validation on a Windows 11 machine
+- go/no-go decision for v2.0 vs v2.1
 
 ## Working Rule For Future v2 Slices
 
@@ -141,8 +145,9 @@ Before coding:
 
 Most justified next step from the current state:
 
-- continue Epic `#58` by exposing route-hit diagnostics in CLI/dry-run/toast surfaces
+- Real Windows 11 validation of the `kbintake-com` DLL on a physical machine (`#57`)
 
 After that:
 
-- continue `#57` with a separate DLL proof of concept on Windows 11
+- Watch Mode (`#62`) — file system watcher that reuses the routing/template engine
+- TUI settings flow (`#60`) — GUI for editing config.toml

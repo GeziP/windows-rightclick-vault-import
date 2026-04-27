@@ -20,6 +20,9 @@ Use this together with:
 
 Recent v2 commits on this branch:
 
+- `5d41f48` Add manual template override for import (#58)
+- `5a15f4d` Add kbintake-com COM DLL spike for Windows 11 native context menu
+- `a3c9004` Add v2 handoff notes for follow-up work
 - `192b34b` Add Windows 11 COM feasibility probe
 - `cc98c8d` Expose matched routing rules in previews and toasts
 - `64bb55d` Align v2 work with issue tracking
@@ -175,39 +178,25 @@ keys or the DLL to be signed.
 
 Most recent successful validations:
 
-For template/routing work:
-
 ```powershell
-cd kbintake
-cargo fmt --all
-cargo test --locked
-cargo clippy --all-targets --all-features --locked -- -D warnings
+cargo test --locked                            # 160 tests (108 unit + 52 integration)
+cargo clippy --package kbintake --all-targets --all-features --locked -- -D warnings
+cargo clippy --package kbintake-com --all-targets --all-features --locked -- -D warnings
+cargo build --release --locked                 # kbintake + kbintake-com
 ```
-
-For the COM feasibility probe slice:
-
-```powershell
-cd kbintake
-cargo test
-cargo clippy --all-targets --all-features -- -D warnings
-```
-
-Reason the second slice did not use `--locked`:
-
-- it introduced the `windows` crate dependency
-- `Cargo.lock` was refreshed accordingly
 
 ## Files Most Relevant To Continue From
 
 - `docs/V2_ISSUE_MAP.md`
 - `docs/WIN11_COM_FEASIBILITY.md`
-- `docs/V2_DEVELOPMENT_PLAN.md`
-- `kbintake/src/config/mod.rs`
+- `kbintake-com/src/command.rs` — IExplorerCommand vtable
+- `kbintake-com/src/server.rs` — DllGetClassObject / DllCanUnloadNow
+- `kbintake-com/src/reg.rs` — HKCR registration helpers
+- `kbintake/src/config/mod.rs` — ImportRoutingIntent + resolve_import_intent
+- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template
 - `kbintake/src/processor/template.rs`
 - `kbintake/src/processor/dry_run.rs`
-- `kbintake/src/cli/mod.rs`
 - `kbintake/src/explorer/mod.rs`
-- `kbintake/src/explorer/com_probe.rs`
 - `kbintake/tests/mvp_flow.rs`
 
 ## Handoff Guidance
