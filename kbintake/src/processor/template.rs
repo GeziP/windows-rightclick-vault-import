@@ -1,11 +1,32 @@
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Utc};
 
 use crate::config::TemplateConfig;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedTemplate {
+    pub name: String,
+    pub subfolder: Option<String>,
+    pub tags: Vec<String>,
+    pub frontmatter: toml::Table,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TemplateRenderContext {
+    pub source_path: String,
+    pub source_name: String,
+    pub file_ext: Option<String>,
+    pub file_size_bytes: u64,
+    pub imported_at: DateTime<Utc>,
+    pub sha256: String,
+    pub target_name: String,
+    pub batch_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RenderedTemplate {
     pub name: String,
     pub subfolder: Option<String>,
     pub tags: Vec<String>,
@@ -26,6 +47,25 @@ pub fn resolve_template(
 
 pub fn default_template(templates: &[TemplateConfig]) -> Option<&TemplateConfig> {
     templates.first()
+}
+
+pub fn render_template(
+    template: &ResolvedTemplate,
+    context: &TemplateRenderContext,
+) -> RenderedTemplate {
+    RenderedTemplate {
+        name: template.name.clone(),
+        subfolder: template
+            .subfolder
+            .as_deref()
+            .map(|value| render_string(value, context)),
+        tags: template
+            .tags
+            .iter()
+            .map(|tag| render_string(tag, context))
+            .collect(),
+        frontmatter: render_table(&template.frontmatter, context),
+    }
 }
 
 fn resolve_from_map(
@@ -118,11 +158,87 @@ fn dedupe_tags(tags: &[String]) -> Vec<String> {
     merge_tags(&[], tags)
 }
 
+fn render_table(table: &toml::Table, context: &TemplateRenderContext) -> toml::Table {
+    table
+        .iter()
+        .map(|(key, value)| (key.clone(), render_value(value, context)))
+        .collect()
+}
+
+fn render_value(value: &toml::Value, context: &TemplateRenderContext) -> toml::Value {
+    match value {
+        toml::Value::String(inner) => toml::Value::String(render_string(inner, context)),
+        toml::Value::Array(items) => toml::Value::Array(
+            items
+                .iter()
+                .map(|item| render_value(item, context))
+                .collect(),
+        ),
+        toml::Value::Table(table) => toml::Value::Table(render_table(table, context)),
+        _ => value.clone(),
+    }
+}
+
+fn render_string(input: &str, context: &TemplateRenderContext) -> String {
+    let mut rendered = input.to_string();
+    for (name, value) in template_variables(context) {
+        let needle = format!("{{{{{name}}}}}");
+        rendered = rendered.replace(&needle, &value);
+    }
+    rendered
+}
+
+fn template_variables(context: &TemplateRenderContext) -> [(&'static str, String); 9] {
+    [
+        ("file_name", source_stem(&context.source_name)),
+        (
+            "file_ext",
+            context
+                .file_ext
+                .clone()
+                .unwrap_or_default()
+                .to_ascii_lowercase(),
+        ),
+        (
+            "file_size_kb",
+            file_size_kb(context.file_size_bytes).to_string(),
+        ),
+        ("imported_at", context.imported_at.to_rfc3339()),
+        (
+            "imported_at_date",
+            context
+                .imported_at
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string(),
+        ),
+        ("source_path", context.source_path.clone()),
+        ("sha256", context.sha256.clone()),
+        ("target_name", context.target_name.clone()),
+        ("batch_id", context.batch_id.clone()),
+    ]
+}
+
+fn source_stem(source_name: &str) -> String {
+    std::path::Path::new(source_name)
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| source_name.to_string())
+}
+
+fn file_size_kb(size_bytes: u64) -> u64 {
+    size_bytes.div_ceil(1024)
+}
+
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
     use toml::Table;
 
-    use super::{default_template, resolve_template};
+    use super::{
+        default_template, render_template, resolve_template, RenderedTemplate,
+        TemplateRenderContext,
+    };
     use crate::config::TemplateConfig;
 
     fn template(name: &str) -> TemplateConfig {
@@ -132,6 +248,19 @@ mod tests {
             subfolder: None,
             tags: Vec::new(),
             frontmatter: Table::new(),
+        }
+    }
+
+    fn render_context() -> TemplateRenderContext {
+        TemplateRenderContext {
+            source_path: r"C:\Users\dev\Downloads\attention.pdf".to_string(),
+            source_name: "attention.pdf".to_string(),
+            file_ext: Some("PDF".to_string()),
+            file_size_bytes: 2_560,
+            imported_at: Utc.with_ymd_and_hms(2026, 4, 27, 1, 2, 3).unwrap(),
+            sha256: "abc123ff".to_string(),
+            target_name: "research".to_string(),
+            batch_id: "batch-123".to_string(),
         }
     }
 
@@ -249,5 +378,104 @@ mod tests {
             default_template(&[first, second]).map(|template| template.name.as_str()),
             Some("first")
         );
+    }
+
+    #[test]
+    fn renders_template_strings_using_builtin_variables() {
+        let mut resolved = resolve_template(&[template("capture")], "capture").unwrap();
+        resolved.subfolder = Some("papers/{{imported_at_date}}".to_string());
+        resolved.tags = vec!["{{file_ext}}".to_string(), "{{target_name}}".to_string()];
+        resolved.frontmatter.insert(
+            "title".to_string(),
+            toml::Value::String("{{file_name}}".to_string()),
+        );
+        resolved.frontmatter.insert(
+            "source".to_string(),
+            toml::Value::String("{{source_path}}".to_string()),
+        );
+        resolved.frontmatter.insert(
+            "size_kb".to_string(),
+            toml::Value::String("{{file_size_kb}}".to_string()),
+        );
+        resolved.frontmatter.insert(
+            "imported".to_string(),
+            toml::Value::String("{{imported_at}}".to_string()),
+        );
+        resolved.frontmatter.insert(
+            "hash".to_string(),
+            toml::Value::String("{{sha256}}".to_string()),
+        );
+        resolved.frontmatter.insert(
+            "batch".to_string(),
+            toml::Value::String("{{batch_id}}".to_string()),
+        );
+
+        let rendered = render_template(&resolved, &render_context());
+
+        assert_eq!(rendered.subfolder.as_deref(), Some("papers/2026-04-27"));
+        assert_eq!(rendered.tags, vec!["pdf", "research"]);
+        assert_eq!(rendered.frontmatter["title"].as_str(), Some("attention"));
+        assert_eq!(
+            rendered.frontmatter["source"].as_str(),
+            Some(r"C:\Users\dev\Downloads\attention.pdf")
+        );
+        assert_eq!(rendered.frontmatter["size_kb"].as_str(), Some("3"));
+        assert_eq!(
+            rendered.frontmatter["imported"].as_str(),
+            Some("2026-04-27T01:02:03+00:00")
+        );
+        assert_eq!(rendered.frontmatter["hash"].as_str(), Some("abc123ff"));
+        assert_eq!(rendered.frontmatter["batch"].as_str(), Some("batch-123"));
+    }
+
+    #[test]
+    fn renders_nested_frontmatter_values() {
+        let mut resolved = resolve_template(&[template("capture")], "capture").unwrap();
+        resolved.frontmatter.insert(
+            "tags".to_string(),
+            toml::Value::Array(vec![
+                toml::Value::String("{{file_ext}}".to_string()),
+                toml::Value::String("{{target_name}}".to_string()),
+            ]),
+        );
+        resolved.frontmatter.insert(
+            "meta".to_string(),
+            toml::Value::Table(
+                [(
+                    "path".to_string(),
+                    toml::Value::String("{{source_path}}".to_string()),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+        );
+
+        let rendered = render_template(&resolved, &render_context());
+
+        assert_eq!(
+            rendered.frontmatter["tags"].as_array().unwrap(),
+            &vec![
+                toml::Value::String("pdf".to_string()),
+                toml::Value::String("research".to_string())
+            ]
+        );
+        assert_eq!(
+            rendered.frontmatter["meta"]["path"].as_str(),
+            Some(r"C:\Users\dev\Downloads\attention.pdf")
+        );
+    }
+
+    #[test]
+    fn leaves_unknown_variables_unchanged() {
+        let resolved = RenderedTemplate {
+            name: "capture".to_string(),
+            subfolder: None,
+            tags: Vec::new(),
+            frontmatter: Table::new(),
+        };
+        let unresolved = super::render_string("{{unknown}}", &render_context());
+
+        assert_eq!(resolved.name, "capture");
+        assert_eq!(unresolved, "{{unknown}}");
     }
 }
