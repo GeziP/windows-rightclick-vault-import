@@ -153,7 +153,12 @@ pub fn preview_import(
                     let subfolder = rendered.subfolder.clone();
                     let preview_root = match &subfolder {
                         Some(subfolder) => target.root_path.join(subfolder),
-                        None => target.root_path.clone(),
+                        None => target
+                            .default_subfolder
+                            .as_deref()
+                            .filter(|subfolder| !subfolder.trim().is_empty())
+                            .map(|subfolder| target.root_path.join(subfolder))
+                            .unwrap_or_else(|| target.root_path.clone()),
                     };
                     template_name = Some(rendered.name.clone());
                     rendered_subfolder = subfolder;

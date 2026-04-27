@@ -6,7 +6,7 @@ use tracing::{error, info, warn};
 use crate::adapter::local_folder::LocalFolderAdapter;
 use crate::app::App;
 use crate::domain::{DomainEvent, ItemJob, ManifestRecord};
-use crate::processor::{deduper, frontmatter, hasher, validator};
+use crate::processor::{deduper, frontmatter, hasher, template, validator};
 use crate::queue::repository::Repository;
 
 pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
@@ -73,6 +73,45 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
     };
     repo.update_item_hash(&item.item_id, &hash, size as i64)?;
 
+    let rendered_template: Result<Option<template::RenderedTemplate>> =
+        if let Some(template_config) = app.config.template_for_path(&source, size) {
+            let resolved =
+                template::resolve_template(&app.config.templates, &template_config.name)?;
+            Ok(Some(template::render_template(
+                &resolved,
+                &template::TemplateRenderContext {
+                    source_path: item.source_path.clone(),
+                    source_name: item.source_name.clone(),
+                    file_ext: item.file_ext.clone(),
+                    file_size_bytes: size,
+                    imported_at: chrono::Utc::now(),
+                    sha256: hash.clone(),
+                    target_name: target.name.clone(),
+                    batch_id: item.batch_id.clone(),
+                },
+            )))
+        } else {
+            Ok(None)
+        };
+    let rendered_template = match rendered_template {
+        Ok(rendered_template) => rendered_template,
+        Err(err) => {
+            repo.mark_item_failed(&item.item_id, "E_TEMPLATE_FAILED", &err.to_string())?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.failed",
+                serde_json::json!({
+                    "status": "failed",
+                    "error_code": "E_TEMPLATE_FAILED",
+                    "error_message": err.to_string()
+                }),
+            )?;
+            error!(item_id = %item.item_id, error = %err, "template render failed");
+            return Ok(());
+        }
+    };
+
     if let Some(existing_record_id) = deduper::find_duplicate_record(&repo, &item.target_id, &hash)?
     {
         repo.mark_item_duplicate(&item.item_id, &existing_record_id)?;
@@ -90,7 +129,20 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
     }
 
     repo.update_item_running(&item.item_id, "copying")?;
-    let adapter = LocalFolderAdapter::new(&target.root_path);
+    let destination_root = rendered_template
+        .as_ref()
+        .and_then(|template| template.subfolder.as_deref())
+        .filter(|subfolder| !subfolder.trim().is_empty())
+        .map(|subfolder| target.root_path.join(subfolder))
+        .or_else(|| {
+            target
+                .default_subfolder
+                .as_deref()
+                .filter(|subfolder| !subfolder.trim().is_empty())
+                .map(|subfolder| target.root_path.join(subfolder))
+        })
+        .unwrap_or_else(|| target.root_path.clone());
+    let adapter = LocalFolderAdapter::new(destination_root);
     let dest = match adapter.store_copy(&source, &item.source_name) {
         Ok(dest) => dest,
         Err(err) => {
@@ -122,6 +174,9 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
                 sha256: hash.clone(),
                 target: target.name.clone(),
             },
+            rendered_template
+                .as_ref()
+                .map(|template| &template.frontmatter),
         ) {
             repo.mark_item_failed(&item.item_id, "E_FRONTMATTER_FAILED", &err.to_string())?;
             record_item_event(
@@ -138,6 +193,25 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
             return Ok(());
         }
     }
+
+    let stored_sha256 = match hasher::sha256_file(&dest) {
+        Ok(stored_sha256) => stored_sha256,
+        Err(err) => {
+            repo.mark_item_failed(&item.item_id, "E_HASH_FAILED", &err.to_string())?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.failed",
+                serde_json::json!({
+                    "status": "failed",
+                    "error_code": "E_HASH_FAILED",
+                    "error_message": err.to_string()
+                }),
+            )?;
+            error!(item_id = %item.item_id, error = %err, "stored file hash failed");
+            return Ok(());
+        }
+    };
 
     let record = ManifestRecord::new(
         item.item_id.clone(),
@@ -186,7 +260,7 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         error!(item_id = %item.item_id, error = %err, "manifest insert failed");
         return Ok(());
     }
-    repo.mark_item_success(&item.item_id, &record.stored_path)?;
+    repo.mark_item_success(&item.item_id, &record.stored_path, &stored_sha256)?;
     record_item_event(
         &repo,
         &item,

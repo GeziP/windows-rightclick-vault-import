@@ -204,6 +204,67 @@ fn markdown_import_appends_to_existing_frontmatter() {
 }
 
 #[test]
+fn template_import_stores_markdown_in_rendered_subfolder() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "capture"
+subfolder = "captures/{{imported_at_date}}"
+[templates.frontmatter]
+title = "{{file_name}}"
+kind = "note"
+
+[[routing_rules]]
+extension = "md"
+template = "capture"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("templated.md");
+    fs::write(&source, "body").unwrap();
+    let original_hash = kbintake::processor::hasher::sha256_file(&source).unwrap();
+
+    handle_import(&app, None, vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let expected_subfolder = chrono::Utc::now().format("captures/%Y-%m-%d").to_string();
+    let stored = app.config.targets[0]
+        .root_path
+        .join(&expected_subfolder)
+        .join("templated.md");
+    let stored_display = stored.display().to_string();
+    let content = fs::read_to_string(&stored).unwrap();
+    assert!(stored.exists());
+    assert!(content.starts_with("---\n"));
+    assert!(content.contains("title: \"templated\"\n"));
+    assert!(content.contains("kind: \"note\"\n"));
+    assert!(content.contains("kbintake_source:"));
+    assert!(
+        content.find("title: \"templated\"").unwrap() < content.find("kbintake_source:").unwrap()
+    );
+    assert!(content.find("kind: \"note\"").unwrap() < content.find("kbintake_source:").unwrap());
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(item.stored_path.as_deref(), Some(stored_display.as_str()));
+    assert!(item.stored_sha256.is_some());
+    assert_ne!(item.stored_sha256.as_deref(), Some(original_hash.as_str()));
+    assert_eq!(item.sha256.as_deref(), Some(original_hash.as_str()));
+}
+
+#[test]
 fn non_markdown_import_is_not_modified() {
     let temp = tempfile::tempdir().unwrap();
     let app = bootstrap_temp_app(&temp);
@@ -645,6 +706,63 @@ fn jobs_undo_deletes_imported_files_and_marks_batch_undone() {
 }
 
 #[test]
+fn jobs_undo_deletes_template_frontmatter_import_without_false_modified_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "capture"
+subfolder = "captures/{{imported_at_date}}"
+[templates.frontmatter]
+title = "{{file_name}}"
+kind = "note"
+
+[[routing_rules]]
+extension = "md"
+template = "capture"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+
+    let source = temp.path().join("undo-template.md");
+    fs::write(&source, "undo me").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let stored_path = item.stored_path.clone().unwrap();
+    assert!(item.stored_sha256.is_some());
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(!std::path::Path::new(&stored_path).exists());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("WARN: File"));
+}
+
+#[test]
 fn jobs_undo_returns_partial_when_file_modified() {
     let temp = tempfile::tempdir().unwrap();
     let app_data_dir = temp.path().join("appdata");
@@ -1048,7 +1166,7 @@ fn cli_doctor_fix_creates_missing_target_and_reports_checks() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[OK] Config file"));
     assert!(stdout.contains("[OK] Database schema"));
-    assert!(stdout.contains("Schema version: 3 (up to date)"));
+    assert!(stdout.contains("Schema version: 4 (up to date)"));
     assert!(stdout.contains("[OK] Target directory"));
     assert!(app_data_dir.join("vault").exists());
 }
@@ -1090,7 +1208,7 @@ fn cli_doctor_migrate_flag_reports_schema_version() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Schema version: 3 (up to date)"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Schema version: 4 (up to date)"));
 }
 
 #[test]

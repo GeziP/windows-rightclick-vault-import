@@ -124,9 +124,9 @@ impl<'a> Repository<'a> {
         self.conn.execute(
             "INSERT INTO items (
                 item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
-                source_size, sha256, stored_path, duplicate_of, error_code, error_message,
+                source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
                 created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 &item.item_id,
                 &item.batch_id,
@@ -138,6 +138,7 @@ impl<'a> Repository<'a> {
                 item.stage.as_deref(),
                 item.source_size,
                 item.sha256.as_deref(),
+                item.stored_sha256.as_deref(),
                 item.stored_path.as_deref(),
                 item.duplicate_of.as_deref(),
                 item.error_code.as_deref(),
@@ -152,7 +153,7 @@ impl<'a> Repository<'a> {
     pub fn list_items_by_batch(&self, batch_id: &str) -> Result<Vec<ItemJob>> {
         let mut stmt = self.conn.prepare(
             "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
-                    source_size, sha256, stored_path, duplicate_of, error_code, error_message,
+                    source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
                     created_at, updated_at
              FROM items WHERE batch_id = ?1 ORDER BY created_at ASC",
         )?;
@@ -208,7 +209,7 @@ impl<'a> Repository<'a> {
         self.conn
             .query_row(
                 "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
-                        source_size, sha256, stored_path, duplicate_of, error_code, error_message,
+                        source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
                         created_at, updated_at
                  FROM items WHERE status = ?1 ORDER BY created_at ASC LIMIT 1",
                 params![state_machine::STATUS_QUEUED],
@@ -241,10 +242,21 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
-    pub fn mark_item_success(&self, item_id: &str, stored_path: &str) -> Result<()> {
+    pub fn mark_item_success(
+        &self,
+        item_id: &str,
+        stored_path: &str,
+        stored_sha256: &str,
+    ) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE items SET status = ?1, stored_path = ?2, stage = NULL, updated_at = ?3 WHERE item_id = ?4",
-            params![state_machine::STATUS_SUCCESS, stored_path, Utc::now().to_rfc3339(), item_id],
+            "UPDATE items SET status = ?1, stored_path = ?2, stored_sha256 = ?3, stage = NULL, updated_at = ?4 WHERE item_id = ?5",
+            params![
+                state_machine::STATUS_SUCCESS,
+                stored_path,
+                stored_sha256,
+                Utc::now().to_rfc3339(),
+                item_id
+            ],
         )?;
         ensure_updated(rows, "item", item_id)?;
         Ok(())
@@ -463,12 +475,13 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ItemJob> {
         stage: row.get(7)?,
         source_size: row.get(8)?,
         sha256: row.get(9)?,
-        stored_path: row.get(10)?,
-        duplicate_of: row.get(11)?,
-        error_code: row.get(12)?,
-        error_message: row.get(13)?,
-        created_at: parse_utc(row.get(14)?)?,
-        updated_at: parse_utc(row.get(15)?)?,
+        stored_sha256: row.get(10)?,
+        stored_path: row.get(11)?,
+        duplicate_of: row.get(12)?,
+        error_code: row.get(13)?,
+        error_message: row.get(14)?,
+        created_at: parse_utc(row.get(15)?)?,
+        updated_at: parse_utc(row.get(16)?)?,
     })
 }
 
@@ -525,7 +538,9 @@ mod tests {
         assert!(repo.update_batch_status("missing", "running").is_err());
         assert!(repo.update_item_running("missing", "hashing").is_err());
         assert!(repo.update_item_hash("missing", "abc", 3).is_err());
-        assert!(repo.mark_item_success("missing", "stored.md").is_err());
+        assert!(repo
+            .mark_item_success("missing", "stored.md", "stored-hash")
+            .is_err());
         assert!(repo.mark_item_duplicate("missing", "record").is_err());
         assert!(repo
             .mark_item_failed("missing", "E_TEST", "failed")
@@ -541,7 +556,7 @@ mod tests {
         let (conn, batch, item) = repo_with_conn();
         let repo = Repository::new(&conn);
 
-        repo.mark_item_success(&item.item_id, "vault/source.md")
+        repo.mark_item_success(&item.item_id, "vault/source.md", "stored-hash")
             .unwrap();
         repo.refresh_batch_status(&batch.batch_id).unwrap();
 
@@ -562,7 +577,7 @@ mod tests {
         );
         repo.insert_item(&second).unwrap();
 
-        repo.mark_item_success(&item.item_id, "vault/source.md")
+        repo.mark_item_success(&item.item_id, "vault/source.md", "stored-hash")
             .unwrap();
         repo.mark_item_failed(&second.item_id, "E_TEST", "failed")
             .unwrap();
@@ -610,7 +625,7 @@ mod tests {
         repo.insert_item(&second).unwrap();
         repo.mark_item_failed(&item.item_id, "E_TEST", "failed")
             .unwrap();
-        repo.mark_item_success(&second.item_id, "vault/other.md")
+        repo.mark_item_success(&second.item_id, "vault/other.md", "stored-hash")
             .unwrap();
 
         let retried = repo.retry_failed_items_by_batch(&batch.batch_id).unwrap();

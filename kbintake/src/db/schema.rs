@@ -73,3 +73,7 @@ pub const MIGRATION_003_EVENT_LOOKUP_INDEX: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_events_entity_created_at
 ON events(entity_type, entity_id, created_at);
 "#;
+
+pub const MIGRATION_004_ITEM_STORED_SHA256: &str = r#"
+ALTER TABLE items ADD COLUMN stored_sha256 TEXT;
+"#;

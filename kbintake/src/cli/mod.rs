@@ -490,17 +490,22 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
 
                 let path = PathBuf::from(&stored_path);
                 if path.exists() {
-                    let expected_hash = item.sha256.as_deref().unwrap_or_default();
-                    let hash_matches = if app.config.import.inject_frontmatter
-                        && crate::processor::frontmatter::is_markdown_extension(
-                            item.file_ext.as_deref(),
-                        ) {
-                        crate::processor::frontmatter::file_matches_original_hash(
-                            &path,
-                            expected_hash,
-                        )?
-                    } else {
+                    let hash_matches = if let Some(expected_hash) = item.stored_sha256.as_deref() {
                         crate::processor::hasher::sha256_file(&path)? == expected_hash
+                    } else {
+                        let expected_hash = item.sha256.as_deref().unwrap_or_default();
+                        if app.config.import.inject_frontmatter
+                            && crate::processor::frontmatter::is_markdown_extension(
+                                item.file_ext.as_deref(),
+                            )
+                        {
+                            crate::processor::frontmatter::file_matches_original_hash(
+                                &path,
+                                expected_hash,
+                            )?
+                        } else {
+                            crate::processor::hasher::sha256_file(&path)? == expected_hash
+                        }
                     };
                     if !hash_matches {
                         let warning = format!(
