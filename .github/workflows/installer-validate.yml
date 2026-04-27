@@ -9,6 +9,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTFLAGS: -C target-feature=+crt-static
 
 jobs:
   windows-installer:
@@ -44,28 +45,9 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ..\dist | Out-Null
-          New-Item -ItemType Directory -Force ..\dist\crt | Out-Null
           Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintake.exe ..\dist\kbintake.exe -Force
           Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintakew.exe ..\dist\kbintakew.exe -Force
           Copy-Item .\assets\kbintake.ico ..\dist\kbintake.ico -Force
-          $crtDir = Get-ChildItem `
-            -Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio" `
-            -Recurse `
-            -Directory `
-            -Filter "Microsoft.VC143.CRT" `
-            -ErrorAction Stop |
-            Where-Object { $_.Parent -and $_.Parent.Name -eq "x64" } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $crtDir) {
-            throw "Microsoft.VC143.CRT redistributable directory not found."
-          }
-          Copy-Item "$crtDir\\*.dll" ..\dist\crt -Force
-          $crtFiles = Get-ChildItem ..\dist\crt\*.dll
-          if ($crtFiles.Count -lt 3) {
-            throw "Expected staged CRT DLLs, found only $($crtFiles.Count)."
-          }
-          $crtFiles | Select-Object Name | Format-Table -AutoSize
 
       - name: Install NSIS
         shell: pwsh
@@ -114,8 +96,6 @@ jobs:
             "kbintake.exe"
             "kbintakew.exe"
             "kbintake.ico"
-            "vcruntime140.dll"
-            "msvcp140.dll"
           )
           foreach ($file in $requiredFiles) {
             $path = Join-Path $installDir $file
@@ -164,4 +144,3 @@ jobs:
             dist/kbintake.exe
             dist/kbintakew.exe
             dist/kbintake.ico
-            dist/crt
