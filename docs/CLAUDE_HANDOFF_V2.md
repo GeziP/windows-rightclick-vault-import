@@ -128,7 +128,7 @@ Current architectural verdict:
 
 ### Still open in `#58`
 
-- explicit zh-CN user-facing output requirements
+(None)
 
 ### Recently completed in `#58`
 
@@ -155,6 +155,15 @@ Still open in `#62`:
 - Duplicate watcher detection (PID lock file)
 - Integration with Windows Service mode for auto-start
 - Toast notification on watch import completion
+
+### Phase 1 / `#61` zh-CN localization
+
+Implemented:
+
+- `kbintake/src/i18n.rs` — `tr(key, lang)` translation function with en/zh-CN dictionaries
+- `[import].language` config field, defaults to `"en"`
+- All CLI output, toast notifications, and error messages localized
+- Set `language = "zh-CN"` in `config.toml` to enable Chinese output
 
 ### Still open in `#59`
 
@@ -191,7 +200,7 @@ keys or the DLL to be signed.
 
 - Watch Mode (`#62`) — **completed** (file system watcher)
 - TUI settings flow (`#60`) — not started
-- zh-CN localization (`#61`) — not started
+- zh-CN localization (`#61`) — **completed**
 - Obsidian URI integration (`#63`) — not started
 
 ## Validation State At Handoff
@@ -212,9 +221,10 @@ cargo build --release --locked                 # kbintake + kbintake-com
 - `kbintake-com/src/command.rs` — IExplorerCommand vtable
 - `kbintake-com/src/server.rs` — DllGetClassObject / DllCanUnloadNow
 - `kbintake-com/src/reg.rs` — HKCR registration helpers
-- `kbintake/src/config/mod.rs` — ImportRoutingIntent + resolve_import_intent + WatchConfig
-- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template + Watch command
+- `kbintake/src/config/mod.rs` — ImportRoutingIntent + resolve_import_intent + WatchConfig + language
+- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template + Watch command + i18n
 - `kbintake/src/agent/watcher.rs` — Watch Mode implementation
+- `kbintake/src/i18n.rs` — zh-CN translation dictionary and tr() function
 - `kbintake/src/processor/template.rs`
 - `kbintake/src/processor/dry_run.rs`
 - `kbintake/src/explorer/mod.rs`

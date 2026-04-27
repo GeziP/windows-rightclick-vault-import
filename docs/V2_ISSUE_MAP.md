@@ -101,6 +101,22 @@ Still open for `#62`:
 - Integration with Windows Service mode for auto-start
 - Toast notification on watch import completion
 
+### Phase 1 / Epic `#61` zh-CN localization
+
+Implemented:
+
+- `kbintake/src/i18n.rs` — minimal `tr()` translation function
+- `[import]` config section gains `language = "zh-CN"` option
+- All CLI output messages localized (import, jobs, targets, vault, doctor)
+- Toast notification messages localized (success, queued, failure)
+- Dry-run table header localized
+- Error messages in config, processor, explorer, service modules localized
+- Defaults to `"en"` when `language` is unset
+
+Still open for `#61`:
+
+- any community-contributed refinements to Chinese wording
+
 ### Phase 1 / Epic `#58` — manual template override
 
 Implemented:
