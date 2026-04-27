@@ -104,6 +104,15 @@ pub struct RouteSelection {
     pub matched_rule_template: Option<String>,
 }
 
+/// Resolved routing intent for an import operation, combining explicit overrides
+/// with automatic routing.
+#[derive(Debug, Clone)]
+pub struct ImportRoutingIntent {
+    pub target: Target,
+    pub template_name: Option<String>,
+    pub matched_rule_template: Option<String>,
+}
+
 impl ConfigValidation {
     pub fn is_valid(&self) -> bool {
         self.errors.is_empty()
@@ -205,6 +214,75 @@ impl AppConfig {
             target,
             matched_rule_template: matched_rule.map(|rule| rule.template.clone()),
         })
+    }
+
+    /// Resolve full routing intent for an import, honouring explicit target and template overrides.
+    ///
+    /// When `explicit_template` is `Some`, routing-rule template selection is bypassed and the
+    /// named template is used directly. When `explicit_target` is `Some`, the routing-rule template
+    /// is suppressed (the caller explicitly directed the target). Target resolution still follows
+    /// the explicit-then-default chain.
+    pub fn resolve_import_intent(
+        &self,
+        path: &std::path::Path,
+        source_size_bytes: u64,
+        explicit_target: Option<String>,
+        explicit_template: Option<String>,
+    ) -> Result<ImportRoutingIntent> {
+        let is_explicit_target = explicit_target.is_some();
+
+        // Resolve matched rule template first (before any move).
+        let routing_rule_template = self
+            .first_matching_routing_rule(path, source_size_bytes)
+            .filter(|_| !is_explicit_target)
+            .map(|rule| rule.template.clone());
+
+        let target = match explicit_target {
+            Some(id) => self.target_by_id(&id)?,
+            None => {
+                let matched_rule = self.first_matching_routing_rule(path, source_size_bytes);
+                if let Some(target) = matched_rule.and_then(|rule| rule.target.as_deref()) {
+                    self.target_by_id(target)?
+                } else {
+                    self.target_for_path(path)?
+                }
+            }
+        };
+
+        let template_name = match explicit_template {
+            Some(name) => {
+                self.templates
+                    .iter()
+                    .find(|t| t.name == name)
+                    .with_context(|| format!("template not found: {name}"))?;
+                Some(name)
+            }
+            None => routing_rule_template.clone(),
+        };
+
+        Ok(ImportRoutingIntent {
+            target,
+            template_name,
+            matched_rule_template: routing_rule_template,
+        })
+    }
+
+    /// Resolve just the template name for a path, honouring an explicit override.
+    pub fn resolve_template_name(
+        &self,
+        path: &std::path::Path,
+        source_size_bytes: u64,
+        explicit_template: Option<&str>,
+    ) -> Option<String> {
+        match explicit_template {
+            Some(name) => {
+                self.templates.iter().find(|t| t.name == name)?;
+                Some(name.to_string())
+            }
+            None => self
+                .template_for_path(path, source_size_bytes)
+                .map(|t| t.name.clone()),
+        }
     }
 
     pub fn routing_warnings(&self) -> Vec<String> {

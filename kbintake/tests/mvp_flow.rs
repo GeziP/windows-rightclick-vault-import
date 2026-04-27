@@ -101,7 +101,7 @@ fn import_enqueue_creates_batch_and_items() {
     fs::write(&root_file, "root").unwrap();
     fs::write(&nested_file, "child").unwrap();
 
-    handle_import(&app, None, vec![root_file, nested_dir]).unwrap();
+    handle_import(&app, None, None, vec![root_file, nested_dir]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -131,7 +131,7 @@ fn agent_processes_queued_import_successfully() {
     let source = temp.path().join("note.md");
     fs::write(&source, "hello").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -164,7 +164,7 @@ fn markdown_import_injects_frontmatter_with_original_hash() {
     fs::write(&source, "hello").unwrap();
     let original_hash = kbintake::processor::hasher::sha256_file(&source).unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let stored = app.config.targets[0].root_path.join("note.md");
@@ -193,7 +193,7 @@ fn markdown_import_appends_to_existing_frontmatter() {
     let source = temp.path().join("frontmatter.md");
     fs::write(&source, "---\ntitle: Original\n---\nbody").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let content =
@@ -230,7 +230,7 @@ template = "capture"
     fs::write(&source, "body").unwrap();
     let original_hash = kbintake::processor::hasher::sha256_file(&source).unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let expected_subfolder = chrono::Utc::now().format("captures/%Y-%m-%d").to_string();
@@ -299,7 +299,7 @@ target = "archive"
     let source = temp.path().join("routed.pdf");
     fs::write(&source, "pdf body").unwrap();
 
-    let outcome = handle_import(&app, None, vec![source]).unwrap();
+    let outcome = handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -335,7 +335,7 @@ fn non_markdown_import_is_not_modified() {
     let source = temp.path().join("note.txt");
     fs::write(&source, "plain text").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let content = fs::read_to_string(app.config.targets[0].root_path.join("note.txt")).unwrap();
@@ -352,7 +352,7 @@ fn frontmatter_injection_can_be_disabled() {
     let source = temp.path().join("disabled.md");
     fs::write(&source, "raw").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let content = fs::read_to_string(app.config.targets[0].root_path.join("disabled.md")).unwrap();
@@ -368,7 +368,7 @@ fn agent_marks_duplicate_without_second_copy() {
     fs::write(&first, "same").unwrap();
     fs::write(&second, "same").unwrap();
 
-    handle_import(&app, None, vec![first, second]).unwrap();
+    handle_import(&app, None, None, vec![first, second]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -406,7 +406,7 @@ fn explicit_import_target_processes_into_selected_vault() {
     let source = temp.path().join("archive-note.md");
     fs::write(&source, "hello archive").unwrap();
 
-    handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+    handle_import(&app, Some("archive".to_string()), None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -455,7 +455,7 @@ fn import_uses_extension_routing_without_explicit_target() {
     let source = temp.path().join("report.PDF");
     fs::write(&source, "pdf").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     assert!(temp
@@ -498,7 +498,7 @@ fn explicit_target_overrides_extension_routing() {
     let source = temp.path().join("manual.pdf");
     fs::write(&source, "pdf").unwrap();
 
-    handle_import(&app, Some("default".to_string()), vec![source]).unwrap();
+    handle_import(&app, Some("default".to_string()), None, vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     assert!(app.config.targets[0].root_path.join("manual.pdf").exists());
@@ -611,7 +611,7 @@ fn import_process_drains_new_work_end_to_end() {
     let source = temp.path().join("process-note.md");
     fs::write(&source, "process me").unwrap();
 
-    handle_import_command(&app, None, true, false, false, vec![source]).unwrap();
+    handle_import_command(&app, None, None, true, false, false, vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -638,7 +638,7 @@ fn import_without_process_leaves_work_queued() {
     let source = temp.path().join("queued-note.md");
     fs::write(&source, "queue me").unwrap();
 
-    handle_import_command(&app, None, false, false, false, vec![source]).unwrap();
+    handle_import_command(&app, None, None, false, false, false, vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -656,9 +656,9 @@ fn import_process_failure_before_enqueue_does_not_drain_existing_queue() {
     let existing = temp.path().join("existing.md");
     let missing = temp.path().join("missing.md");
     fs::write(&existing, "still queued").unwrap();
-    handle_import(&app, None, vec![existing]).unwrap();
+    handle_import(&app, None, None, vec![existing]).unwrap();
 
-    let err = handle_import_command(&app, None, true, false, false, vec![missing]).unwrap_err();
+    let err = handle_import_command(&app, None, None, true, false, false, vec![missing]).unwrap_err();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -675,7 +675,7 @@ fn jobs_retry_requeues_failed_items_for_successful_agent_drain() {
     let app = bootstrap_temp_app(&temp);
     let source = temp.path().join("retry-note.md");
     fs::write(&source, "will disappear").unwrap();
-    handle_import(&app, None, vec![source.clone()]).unwrap();
+    handle_import(&app, None, None, vec![source.clone()]).unwrap();
     fs::remove_file(&source).unwrap();
     drain_queue(&app).unwrap();
 
@@ -1062,7 +1062,7 @@ fn jobs_undo_rejects_queued_batch() {
     let source = temp.path().join("queued-undo.md");
     fs::write(&source, "queued").unwrap();
     let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -1087,7 +1087,7 @@ fn cli_jobs_list_json_supports_status_filter_and_limit() {
     let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
     let source = temp.path().join("failed.md");
     fs::write(&source, "will fail").unwrap();
-    handle_import(&app, None, vec![source.clone()]).unwrap();
+    handle_import(&app, None, None, vec![source.clone()]).unwrap();
     fs::remove_file(&source).unwrap();
     drain_queue(&app).unwrap();
 

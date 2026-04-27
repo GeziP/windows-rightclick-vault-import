@@ -47,16 +47,14 @@ impl DryRunAction {
 pub fn preview_import(
     app: &App,
     target_id: Option<String>,
+    template: Option<String>,
     paths: Vec<PathBuf>,
 ) -> Result<Vec<DryRunRow>> {
     if paths.is_empty() {
         anyhow::bail!("no input paths provided");
     }
 
-    let explicit_target = match target_id {
-        Some(target_id) => Some(app.config.target_by_id(&target_id)?),
-        None => None,
-    };
+    let explicit_target = target_id;
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
     let mut rows = Vec::new();
@@ -116,13 +114,14 @@ pub fn preview_import(
 
             let hash = hasher::sha256_file(&file)
                 .with_context(|| format!("failed to hash {}", file.display()))?;
-            let (target, matched_rule_template) = match &explicit_target {
-                Some(target) => (target.clone(), None),
-                None => {
-                    let selection = app.config.route_selection_for_path(&file, size)?;
-                    (selection.target, selection.matched_rule_template)
-                }
-            };
+            let intent = app.config.resolve_import_intent(
+                &file,
+                size,
+                explicit_target.clone(),
+                template.clone(),
+            )?;
+            let target = intent.target.clone();
+            let matched_rule_template = intent.template_name.clone();
             if deduper::find_duplicate_record(&repo, &target.target_id, &hash)?.is_some() {
                 rows.push(row(
                     &file,
@@ -145,10 +144,16 @@ pub fn preview_import(
             let mut template_name = None;
             let mut rendered_subfolder = None;
             let mut frontmatter_preview = None;
+            let resolved_template = match &intent.template_name {
+                Some(name) => {
+                    Some(template::resolve_template(&app.config.templates, name)?)
+                }
+                None => app.config.template_for_path(&file, size).and_then(|tc| {
+                    template::resolve_template(&app.config.templates, &tc.name).ok()
+                }),
+            };
             let destination =
-                if let Some(template_config) = app.config.template_for_path(&file, size) {
-                    let resolved =
-                        template::resolve_template(&app.config.templates, &template_config.name)?;
+                if let Some(resolved) = resolved_template {
                     let rendered = template::render_template(
                         &resolved,
                         &template::TemplateRenderContext {
@@ -295,7 +300,7 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        let rows = preview_import(&app, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, vec![source]).unwrap();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -343,7 +348,7 @@ mod tests {
         let source = temp.path().join("paper.pdf");
         fs::write(&source, "preview").unwrap();
 
-        let rows = preview_import(&app, None, vec![source.clone()]).unwrap();
+        let rows = preview_import(&app, None, None, vec![source.clone()]).unwrap();
 
         assert_eq!(rows[0].template.as_deref(), Some("research-paper"));
         assert_eq!(rows[0].target.as_deref(), Some("archive"));
@@ -397,7 +402,7 @@ mod tests {
         );
         repo.insert_manifest(&record).unwrap();
 
-        let rows = preview_import(&app, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipDuplicate);
         assert_eq!(rows[0].target.as_deref(), Some("default"));
@@ -414,7 +419,7 @@ mod tests {
         let source = temp.path().join("large.md");
         fs::write(&source, "too large").unwrap();
 
-        let rows = preview_import(&app, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSizeLimit);
         assert!(rows[0].target.is_none());
@@ -434,7 +439,7 @@ mod tests {
             return;
         }
 
-        let rows = preview_import(&app, None, vec![link]).unwrap();
+        let rows = preview_import(&app, None, None, vec![link]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSymlink);
         assert!(rows[0].target.is_none());

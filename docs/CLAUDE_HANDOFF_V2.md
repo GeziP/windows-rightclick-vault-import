@@ -99,7 +99,7 @@ Implemented:
 
 ### Phase 1 / `#57` Windows 11 native context menu
 
-Feasibility work started, but COM implementation is **not** started.
+COM DLL proof of concept completed.
 
 Implemented:
 
@@ -109,20 +109,31 @@ Implemented:
   - `kbintake/src/explorer/com_probe.rs`
 - spike report:
   - `docs/WIN11_COM_FEASIBILITY.md`
+- separate COM DLL crate (`kbintake-com/`):
+  - manual vtable `IExplorerCommand` implementation
+  - `IClassFactory` for COM instantiation
+  - `DllMain`, `DllGetClassObject`, `DllCanUnloadNow` exports
+  - HKCR registration/unregistration binary
+  - `Invoke` spawns `kbintake.exe import --process` in background
 
 Current architectural verdict:
 
-- native Windows 11 `IExplorerCommand` work requires a separate in-proc COM DLL spike
+- native Windows 11 `IExplorerCommand` requires a separate in-proc COM DLL
 - do **not** try to evolve the current exe-only registry registration directly into native Win11 integration
 
 ## Open Gaps
 
 ### Still open in `#58`
 
-- Explorer/manual-template flow
-- “ignore rule, choose template manually” escape hatch
 - Watch Mode using the same routing/template engine
 - explicit zh-CN user-facing output requirements
+
+### Recently completed in `#58`
+
+- Explorer/manual-template flow via `--template` / `-t` CLI flag
+- `--template` on `explorer run-import` for per-template Explorer menu items
+- `AppConfig::resolve_import_intent()` consolidates all routing logic
+- `ImportRoutingIntent` struct replaces ad-hoc target+template resolution
 
 ### Still open in `#59`
 
@@ -131,9 +142,7 @@ Current architectural verdict:
 
 ### Still open in `#57`
 
-- separate DLL proof of concept
-- static Explorer command registration on Windows 11
-- invoke KBIntake from that DLL path
+- separate DLL proof of concept — **COMPLETED** (`kbintake-com` crate)
 - real install/uninstall validation on Windows 11
 - go/no-go decision for v2.0 vs v2.1
 
@@ -141,20 +150,26 @@ Current architectural verdict:
 
 The most justified next slice is:
 
-### Continue `#57` with a separate DLL proof of concept
+### Real Windows 11 validation of the COM DLL (`#57`)
 
-Target outcome:
+The `kbintake-com` crate compiles and passes all checks. The next step is to register
+it on a real Windows 11 machine and verify:
 
-1. create a Windows-only COM DLL spike crate
-2. make it compile in CI or local Windows build
-3. expose one static `IExplorerCommand`
-4. prove registration/unregistration
-5. invoke the existing KBIntake path from the COM command
+1. `kbintake-com-reg install` works on a live Windows 11 system
+2. Right-click "Show more options" → "Add to Knowledge Base" appears
+3. Selecting files and clicking the menu item triggers `kbintake.exe import --process`
+4. Import succeeds and toast notification appears
+5. `kbintake-com-reg uninstall` cleans up all registry keys
 
-Do **not** start with dynamic template submenu rendering.
-Do **not** merge COM into the main `kbintake.exe` / `kbintakew.exe` registration path yet.
+If Windows 11 native `IExplorerCommand` integration (top-level context menu without
+"Show more options") is desired, further work is needed to ensure the COM DLL is
+properly recognized by Windows 11's new Explorer. This may require additional registry
+keys or the DLL to be signed.
 
-If the DLL spike proves unstable, move native Windows 11 menu work to v2.1 and keep the current registry integration.
+### After that:
+
+- Watch Mode (`#62`) — file system watcher that reuses the routing/template engine
+- TUI settings flow (`#60`) — GUI for editing config.toml
 
 ## Validation State At Handoff
 

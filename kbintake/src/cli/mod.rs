@@ -31,6 +31,8 @@ pub enum Commands {
     Import {
         #[arg(long)]
         target: Option<String>,
+        #[arg(long, short)]
+        template: Option<String>,
         #[arg(long)]
         process: bool,
         #[arg(long)]
@@ -192,6 +194,8 @@ pub enum ExplorerCommands {
     RunImport {
         #[arg(long, help = "Queue right-click imports without immediate processing")]
         queue_only: bool,
+        #[arg(long, help = "Template name to use for this import")]
+        template: Option<String>,
         paths: Vec<PathBuf>,
     },
 }
@@ -234,13 +238,14 @@ pub enum RoutingSummary {
 pub fn handle_import_command(
     app: &App,
     target_id: Option<String>,
+    template: Option<String>,
     process: bool,
     dry_run: bool,
     json: bool,
     paths: Vec<PathBuf>,
 ) -> Result<i32> {
     if dry_run {
-        let rows = crate::processor::dry_run::preview_import(app, target_id, paths)?;
+        let rows = crate::processor::dry_run::preview_import(app, target_id, template, paths)?;
         if json {
             println!("{}", serde_json::to_string_pretty(&rows)?);
         } else {
@@ -249,7 +254,7 @@ pub fn handle_import_command(
         return Ok(exit_codes::SUCCESS);
     }
 
-    let outcome = handle_import(app, target_id, paths)?;
+    let outcome = handle_import(app, target_id, template, paths)?;
     if process {
         scheduler::drain_queue(app)?;
         return import_exit_code(app, &outcome.batch_id);
@@ -260,16 +265,14 @@ pub fn handle_import_command(
 pub fn handle_import(
     app: &App,
     target_id: Option<String>,
+    template: Option<String>,
     paths: Vec<PathBuf>,
 ) -> Result<ImportOutcome> {
     if paths.is_empty() {
         anyhow::bail!("no input paths provided");
     }
 
-    let explicit_target = match target_id {
-        Some(target_id) => Some(app.config.target_by_id(&target_id)?),
-        None => None,
-    };
+    let explicit_target = target_id;
     let mut files = Vec::new();
     for path in paths {
         let discovered = scanner::expand_input_path(&path)
@@ -288,16 +291,13 @@ pub fn handle_import(
             let source_size_bytes = std::fs::metadata(&file)
                 .with_context(|| format!("failed to inspect {}", file.display()))?
                 .len();
-            let (target, matched_rule_template) = match &explicit_target {
-                Some(target) => (target.clone(), None),
-                None => {
-                    let selection = app
-                        .config
-                        .route_selection_for_path(&file, source_size_bytes)?;
-                    (selection.target, selection.matched_rule_template)
-                }
-            };
-            Ok((file, target, matched_rule_template))
+            let intent = app.config.resolve_import_intent(
+                &file,
+                source_size_bytes,
+                explicit_target.clone(),
+                template.clone(),
+            )?;
+            Ok((file, intent.target, intent.template_name))
         })
         .collect::<Result<Vec<_>>>()?;
     let batch_target_id = common_target_id(&routed_files)
@@ -1131,8 +1131,8 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
     }
 }
 
-pub fn handle_explorer_run_import(app: &App, queue_only: bool, paths: Vec<PathBuf>) -> Result<i32> {
-    let outcome = handle_import(app, None, paths)?;
+pub fn handle_explorer_run_import(app: &App, queue_only: bool, template: Option<String>, paths: Vec<PathBuf>) -> Result<i32> {
+    let outcome = handle_import(app, None, template, paths)?;
     if queue_only {
         let toast = ToastContent {
             title: "KBIntake".to_string(),
@@ -1449,7 +1449,7 @@ mod tests {
         let missing = temp.path().join("missing.md");
         fs::write(&valid, "hello").unwrap();
 
-        let err = handle_import(&app, None, vec![valid, missing]).unwrap_err();
+        let err = handle_import(&app, None, None, vec![valid, missing]).unwrap_err();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1464,7 +1464,7 @@ mod tests {
         let empty_dir = temp.path().join("empty");
         fs::create_dir(&empty_dir).unwrap();
 
-        let err = handle_import(&app, None, vec![empty_dir]).unwrap_err();
+        let err = handle_import(&app, None, None, vec![empty_dir]).unwrap_err();
 
         assert!(err.to_string().contains("no importable files found"));
     }
@@ -1507,7 +1507,7 @@ mod tests {
         .unwrap();
         let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
 
-        let outcome = handle_import(&reloaded, None, vec![source]).unwrap();
+        let outcome = handle_import(&reloaded, None, None, vec![source]).unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1626,7 +1626,7 @@ mod tests {
         let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
-        handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+        handle_import(&app, Some("archive".to_string()), None, vec![source]).unwrap();
 
         let err = handle_targets(
             &app,
@@ -1660,7 +1660,7 @@ mod tests {
         let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
-        handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+        handle_import(&app, Some("archive".to_string()), None, vec![source]).unwrap();
 
         handle_targets(
             &app,
@@ -1719,7 +1719,7 @@ mod tests {
         )
         .unwrap_err();
         let import_err =
-            handle_import(&app, Some("archive".to_string()), vec![source]).unwrap_err();
+            handle_import(&app, Some("archive".to_string()), None, vec![source]).unwrap_err();
 
         assert!(rename_err.to_string().contains("archived"));
         assert!(default_err.to_string().contains("archived"));
@@ -1768,7 +1768,7 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        handle_import(&reloaded, Some("archive".to_string()), vec![source]).unwrap();
+        handle_import(&reloaded, Some("archive".to_string()), None, vec![source]).unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1797,7 +1797,7 @@ mod tests {
         let source = temp.path().join("paper.pdf");
         fs::write(&source, "pdf").unwrap();
 
-        let outcome = handle_import(&app, None, vec![source]).unwrap();
+        let outcome = handle_import(&app, None, None, vec![source]).unwrap();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1831,7 +1831,7 @@ mod tests {
         let source = temp.path().join("paper.pdf");
         fs::write(&source, "pdf").unwrap();
 
-        let outcome = handle_import(&app, Some("default".to_string()), vec![source]).unwrap();
+        let outcome = handle_import(&app, Some("default".to_string()), None, vec![source]).unwrap();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1850,7 +1850,7 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        let err = handle_import(&app, Some("missing".to_string()), vec![source]).unwrap_err();
+        let err = handle_import(&app, Some("missing".to_string()), None, vec![source]).unwrap_err();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1869,7 +1869,7 @@ mod tests {
         fs::write(&large, "too large").unwrap();
 
         let code =
-            handle_import_command(&app, None, true, false, false, vec![empty, large]).unwrap();
+            handle_import_command(&app, None, None, true, false, false, vec![empty, large]).unwrap();
 
         assert_eq!(code, exit_codes::PARTIAL_SUCCESS);
     }
@@ -1882,7 +1882,7 @@ mod tests {
         let large = temp.path().join("large.md");
         fs::write(&large, "too large").unwrap();
 
-        let code = handle_import_command(&app, None, true, false, false, vec![large]).unwrap();
+        let code = handle_import_command(&app, None, None, true, false, false, vec![large]).unwrap();
 
         assert_eq!(code, exit_codes::FILE_SIZE_EXCEEDED);
     }

@@ -39,12 +39,13 @@ fn main() -> ExitCode {
             .map_err(|err| (CommandKind::Agent, err)),
         Commands::Import {
             target,
+            template,
             process,
             dry_run,
             json,
             paths,
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_import_command(&app, target, process, dry_run, json, paths))
+            .and_then(|app| cli::handle_import_command(&app, target, template, process, dry_run, json, paths))
             .map_err(|err| (CommandKind::Import, err)),
         Commands::Jobs { command } => {
             let kind = CommandKind::Jobs(command_kind(&command));
@@ -68,9 +69,9 @@ fn main() -> ExitCode {
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Vault, err)),
         Commands::Explorer {
-            command: ExplorerCommands::RunImport { queue_only, paths },
+            command: ExplorerCommands::RunImport { queue_only, template, paths },
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_explorer_run_import(&app, queue_only, paths))
+            .and_then(|app| cli::handle_explorer_run_import(&app, queue_only, template, paths))
             .map_err(|err| {
                 cli::handle_explorer_run_import_error(&err);
                 (CommandKind::Explorer, err)

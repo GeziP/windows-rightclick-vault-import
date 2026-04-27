@@ -80,9 +80,18 @@ Covered by tests:
 
 Still open for `#58`:
 
-- Explorer/manual-template flow and "ignore rule" escape hatch
 - Watch Mode path using the same routing/template engine
 - any explicit Chinese-language error/output requirements not yet implemented
+
+### Phase 1 / Epic `#58` — manual template override
+
+Implemented:
+
+- `--template` / `-t` flag on `kbintake import` CLI command
+- `--template` flag on `explorer run-import` (hidden Explorer command)
+- `AppConfig::resolve_import_intent()` consolidates routing logic with explicit overrides
+- dry-run preview honours `--template` override
+- Explorer right-click can now specify template via registry command args
 
 ### Phase 1 / Epic `#59` Target `default_subfolder`
 
