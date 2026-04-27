@@ -187,6 +187,8 @@ pub enum ExplorerCommands {
     #[command(about = "Remove Windows Explorer right-click menu entries")]
     Uninstall,
     #[command(hide = true)]
+    ComFeasibility,
+    #[command(hide = true)]
     RunImport {
         #[arg(long, help = "Queue right-click imports without immediate processing")]
         queue_only: bool,
@@ -1115,6 +1117,14 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
             println!("Removed Explorer context-menu entries");
             Ok(())
         }
+        ExplorerCommands::ComFeasibility => {
+            let report = crate::explorer::com_probe::probe()?;
+            println!("Windows 11 Explorer COM feasibility probe");
+            for line in report.lines() {
+                println!("{line}");
+            }
+            Ok(())
+        }
         ExplorerCommands::RunImport { .. } => {
             anyhow::bail!("explorer run-import is only intended for the hidden GUI launcher")
         }
@@ -1393,7 +1403,7 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        format_event_line, format_job_show_row, handle_config, handle_import,
+        format_event_line, format_job_show_row, handle_config, handle_explorer, handle_import,
         handle_import_command, handle_targets, queued_toast_line, toast_for_batch, ConfigCommands,
         ExplorerBatchSummary, RoutingSummary, TargetCommands,
     };
@@ -1961,5 +1971,10 @@ mod tests {
         });
 
         assert!(line.contains("Queued 2 item(s) for notes using rule research-paper."));
+    }
+
+    #[test]
+    fn explorer_com_feasibility_command_executes() {
+        handle_explorer(super::ExplorerCommands::ComFeasibility).unwrap();
     }
 }

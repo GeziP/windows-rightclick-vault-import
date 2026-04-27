@@ -22,6 +22,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 walkdir = "2"
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Win32_System_Com"] }
 winreg = "0.52"
 winrt-notification = "0.5"
 windows-service = "0.8"

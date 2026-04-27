@@ -104,12 +104,19 @@ Still open for `#59`:
 
 ### Phase 1 / Epic `#57` Windows 11 native context menu
 
-Not started in implementation.
+Started as a feasibility spike.
+
+Implemented on branch `v2.0`:
+
+- hidden probe command: `kbintake explorer com-feasibility`
+- repo-local spike report: `docs/WIN11_COM_FEASIBILITY.md`
+- initial architecture verdict: proceed only with a separate DLL-oriented spike, not with the current exe-only registration model
 
 Still required by Phase 1 tracker:
 
-- feasibility spike
-- go / no-go decision
+- minimal Windows 11 DLL registration proof of concept
+- static command invocation proof
+- measured go / no-go decision on a real Windows 11 machine
 - fallback documentation if moved to v2.1
 
 ## Working Rule For Future v2 Slices
@@ -129,4 +136,4 @@ Most justified next step from the current state:
 
 After that:
 
-- start the `#57` Windows 11 feasibility spike, because Phase 1 acceptance still depends on a decision there
+- continue `#57` with a separate DLL proof of concept on Windows 11

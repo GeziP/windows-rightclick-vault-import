@@ -1,3 +1,5 @@
+pub mod com_probe;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
