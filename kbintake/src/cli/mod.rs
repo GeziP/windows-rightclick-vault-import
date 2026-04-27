@@ -108,6 +108,7 @@ pub enum JobCommands {
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommands {
     Show,
+    Validate,
     SetTarget {
         path: PathBuf,
         #[arg(long, default_value = "default")]
@@ -880,6 +881,23 @@ pub fn handle_config_show(app: &App) -> Result<()> {
 pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
     match command {
         ConfigCommands::Show => handle_config_show(app),
+        ConfigCommands::Validate => {
+            let validation = app.config.validate_semantics();
+            for warning in &validation.warnings {
+                println!("[WARN] {warning}");
+            }
+            if validation.is_valid() {
+                println!("Config validation succeeded.");
+                return Ok(());
+            }
+            for error in &validation.errors {
+                println!("[ERROR] {error}");
+            }
+            anyhow::bail!(
+                "config validation failed with {} error(s)",
+                validation.errors.len()
+            )
+        }
         ConfigCommands::SetTarget { path, name } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.set_default_target(name, path)?;
@@ -1313,6 +1331,8 @@ mod tests {
                     poll_interval_secs: 5,
                 },
                 routing: Vec::new(),
+                templates: Vec::new(),
+                routing_rules: Vec::new(),
             },
             db_path,
         }

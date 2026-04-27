@@ -412,6 +412,74 @@ fn config_show_displays_routing_rules() {
 }
 
 #[test]
+fn cli_config_validate_accepts_v2_config_sections() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "add", "archive"])
+        .arg(temp.path().join("archive-vault"))
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let config_path = app_data_dir.join("config.toml");
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "research-paper"
+subfolder = "references"
+tags = ["research"]
+[templates.frontmatter]
+type = "paper"
+source = "{{source_path}}"
+
+[[routing_rules]]
+extension = "pdf"
+template = "research-paper"
+target = "archive"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["config", "validate"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Config validation succeeded."));
+}
+
+#[test]
+fn cli_config_validate_rejects_missing_template() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[routing_rules]]
+extension = "pdf"
+template = "missing"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+
+    let output = kbintake_command(&app.config.app_data_dir)
+        .args(["config", "validate"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[ERROR] routing rule references missing template 'missing'"));
+}
+
+#[test]
 fn import_process_drains_new_work_end_to_end() {
     let temp = tempfile::tempdir().unwrap();
     let app = bootstrap_temp_app(&temp);

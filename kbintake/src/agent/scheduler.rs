@@ -81,6 +81,8 @@ mod tests {
                     poll_interval_secs: 5,
                 },
                 routing: Vec::new(),
+                templates: Vec::new(),
+                routing_rules: Vec::new(),
             },
             db_path,
         }

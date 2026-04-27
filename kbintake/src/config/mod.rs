@@ -15,6 +15,10 @@ pub struct AppConfig {
     pub agent: AgentConfig,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routing: Vec<RoutingRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<TemplateConfig>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routing_rules: Vec<RoutingRuleV2>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,6 +38,64 @@ pub struct AgentConfig {
 pub struct RoutingRule {
     pub extensions: Vec<String>,
     pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TemplateConfig {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subfolder: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "toml::Table::is_empty")]
+    pub frontmatter: toml::Table,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RoutingRuleV2 {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension: Option<StringList>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_folder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_name_contains: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_size_kb_gt: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_size_kb_lt: Option<u64>,
+    pub template: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum StringList {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl StringList {
+    pub fn values(&self) -> Vec<&str> {
+        match self {
+            Self::One(value) => vec![value.as_str()],
+            Self::Many(values) => values.iter().map(String::as_str).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigValidation {
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+}
+
+impl ConfigValidation {
+    pub fn is_valid(&self) -> bool {
+        self.errors.is_empty()
+    }
 }
 
 impl AppConfig {
@@ -66,6 +128,8 @@ impl AppConfig {
                 poll_interval_secs: default_poll_interval_secs(),
             },
             routing: Vec::new(),
+            templates: Vec::new(),
+            routing_rules: Vec::new(),
         };
 
         config.save()?;
@@ -104,11 +168,20 @@ impl AppConfig {
     }
 
     pub fn routing_warnings(&self) -> Vec<String> {
-        self.routing
+        let mut warnings = self
+            .routing
             .iter()
             .filter(|rule| self.target_any_by_id(&rule.target).is_err())
             .map(|rule| format!("routing rule references missing target '{}'", rule.target))
-            .collect()
+            .collect::<Vec<_>>();
+        warnings.extend(
+            self.routing_rules
+                .iter()
+                .filter_map(|rule| rule.target.as_deref())
+                .filter(|target| self.target_any_by_id(target).is_err())
+                .map(|target| format!("routing rule references missing target '{target}'")),
+        );
+        warnings
     }
 
     pub fn target_any_by_id(&self, target_id: &str) -> Result<Target> {
@@ -208,6 +281,108 @@ impl AppConfig {
         }
         Ok(target)
     }
+
+    pub fn validate_semantics(&self) -> ConfigValidation {
+        let mut errors = Vec::new();
+        let mut warnings = self.routing_warnings();
+
+        if self.targets.is_empty() {
+            errors.push("no targets configured".to_string());
+        }
+
+        for target in &self.targets {
+            if let Some(subfolder) = &target.default_subfolder {
+                if subfolder.trim().is_empty() {
+                    errors.push(format!(
+                        "target '{}' has an empty default_subfolder",
+                        target.target_id
+                    ));
+                }
+                if std::path::Path::new(subfolder).is_absolute() {
+                    errors.push(format!(
+                        "target '{}' default_subfolder must be relative",
+                        target.target_id
+                    ));
+                }
+            }
+        }
+
+        let mut template_names = std::collections::HashSet::new();
+        for template in &self.templates {
+            let name = template.name.trim();
+            if name.is_empty() {
+                errors.push("template name cannot be empty".to_string());
+                continue;
+            }
+            if !template_names.insert(name.to_string()) {
+                errors.push(format!("duplicate template name '{name}'"));
+            }
+        }
+
+        for template in &self.templates {
+            if let Some(base_template) = template.base_template.as_deref() {
+                if base_template == template.name {
+                    errors.push(format!(
+                        "template '{}' cannot inherit from itself",
+                        template.name
+                    ));
+                } else if !template_names.contains(base_template) {
+                    errors.push(format!(
+                        "template '{}' references missing base_template '{}'",
+                        template.name, base_template
+                    ));
+                } else if self
+                    .templates
+                    .iter()
+                    .find(|candidate| candidate.name == base_template)
+                    .and_then(|candidate| candidate.base_template.as_deref())
+                    .is_some()
+                {
+                    errors.push(format!(
+                        "template '{}' uses nested inheritance through '{}'",
+                        template.name, base_template
+                    ));
+                }
+            }
+        }
+
+        for rule in &self.routing_rules {
+            if !template_names.contains(rule.template.trim()) {
+                errors.push(format!(
+                    "routing rule references missing template '{}'",
+                    rule.template
+                ));
+            }
+            if let Some(extension) = &rule.extension {
+                for value in extension.values() {
+                    if value.trim().is_empty() {
+                        errors.push(format!(
+                            "routing rule for template '{}' has an empty extension",
+                            rule.template
+                        ));
+                    }
+                }
+            }
+            if let Some(target) = rule.target.as_deref() {
+                if self.target_any_by_id(target).is_err() {
+                    errors.push(format!("routing rule references missing target '{target}'"));
+                }
+            }
+            if rule.extension.is_none()
+                && rule.source_folder.is_none()
+                && rule.file_name_contains.is_none()
+                && rule.file_size_kb_gt.is_none()
+                && rule.file_size_kb_lt.is_none()
+            {
+                warnings.push(format!(
+                    "routing rule for template '{}' has no match conditions and will match broadly",
+                    rule.template
+                ));
+            }
+        }
+
+        ConfigValidation { errors, warnings }
+    }
 }
 
 fn default_inject_frontmatter() -> bool {
@@ -281,7 +456,7 @@ pub fn validate_target_root(root_path: &std::path::Path) -> Result<()> {
 mod tests {
     use std::fs;
 
-    use super::{validate_target_root, AppConfig, RoutingRule};
+    use super::{validate_target_root, AppConfig, RoutingRule, RoutingRuleV2, StringList};
 
     #[test]
     fn saves_and_reloads_updated_default_target() {
@@ -489,6 +664,139 @@ mod tests {
 
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("missing"));
+    }
+
+    #[test]
+    fn loads_v2_templates_routing_rules_and_default_subfolder() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data_dir = temp.path().join("appdata");
+        fs::create_dir_all(&app_data_dir).unwrap();
+        let vault = temp.path().join("vault");
+        let raw = format!(
+            r#"
+app_data_dir = "{}"
+
+[[targets]]
+target_id = "default"
+name = "default"
+root_path = "{}"
+default_subfolder = "inbox"
+status = "active"
+
+[import]
+max_file_size_mb = 512
+inject_frontmatter = true
+
+[agent]
+poll_interval_secs = 5
+
+[[templates]]
+name = "research-paper"
+subfolder = "references"
+tags = ["research"]
+[templates.frontmatter]
+type = "paper"
+source = "{{{{source_path}}}}"
+
+[[routing_rules]]
+extension = ["pdf", "md"]
+template = "research-paper"
+target = "default"
+"#,
+            app_data_dir.display().to_string().replace('\\', "\\\\"),
+            vault.display().to_string().replace('\\', "\\\\")
+        );
+        fs::write(app_data_dir.join("config.toml"), raw).unwrap();
+
+        let config = AppConfig::load_or_init_in(app_data_dir).unwrap();
+
+        assert_eq!(
+            config.targets[0].default_subfolder.as_deref(),
+            Some("inbox")
+        );
+        assert_eq!(config.templates[0].name, "research-paper");
+        assert_eq!(
+            config.templates[0].frontmatter["type"].as_str(),
+            Some("paper")
+        );
+        assert!(config.validate_semantics().is_valid());
+        assert_eq!(
+            config.routing_rules[0].extension,
+            Some(StringList::Many(vec!["pdf".to_string(), "md".to_string()]))
+        );
+    }
+
+    #[test]
+    fn loads_v1_routing_without_v2_sections() {
+        let temp = tempfile::tempdir().unwrap();
+        let app_data_dir = temp.path().join("appdata");
+        fs::create_dir_all(&app_data_dir).unwrap();
+        let vault = temp.path().join("vault");
+        let archive = temp.path().join("archive");
+        let raw = format!(
+            r#"
+app_data_dir = "{}"
+
+[[targets]]
+target_id = "default"
+name = "default"
+root_path = "{}"
+status = "active"
+
+[[targets]]
+target_id = "archive"
+name = "archive"
+root_path = "{}"
+status = "active"
+
+[import]
+max_file_size_mb = 512
+inject_frontmatter = true
+
+[agent]
+poll_interval_secs = 5
+
+[[routing]]
+extensions = [".pdf"]
+target = "archive"
+"#,
+            app_data_dir.display().to_string().replace('\\', "\\\\"),
+            vault.display().to_string().replace('\\', "\\\\"),
+            archive.display().to_string().replace('\\', "\\\\")
+        );
+        fs::write(app_data_dir.join("config.toml"), raw).unwrap();
+
+        let config = AppConfig::load_or_init_in(app_data_dir).unwrap();
+        let target = config
+            .target_for_path(std::path::Path::new("paper.pdf"))
+            .unwrap();
+
+        assert_eq!(target.target_id, "archive");
+        assert!(config.templates.is_empty());
+        assert!(config.routing_rules.is_empty());
+    }
+
+    #[test]
+    fn validate_semantics_rejects_missing_template_references() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.routing_rules.push(RoutingRuleV2 {
+            extension: Some(StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "missing".to_string(),
+            target: Some("default".to_string()),
+        });
+
+        let validation = config.validate_semantics();
+
+        assert!(!validation.is_valid());
+        assert!(validation
+            .errors
+            .iter()
+            .any(|error| error.contains("missing template")));
     }
 
     #[test]

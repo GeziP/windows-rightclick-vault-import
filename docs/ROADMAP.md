@@ -98,6 +98,7 @@ Service mode is implemented and validated, but the broader epic remains open for
 ## Planned Features
 
 - public winget installation through `winget install GeziP.KBIntake` after the package PR is merged
+- v2.0 development plan: `docs/V2_DEVELOPMENT_PLAN.md`
 - Authenticode code signing
 - installer option to install/start the Windows Service
 - reboot-resume validation for service mode
