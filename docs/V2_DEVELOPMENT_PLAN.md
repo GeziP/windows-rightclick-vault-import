@@ -25,6 +25,13 @@ Existing GitHub planning:
 - Phase 2 tracker: `#55`
 - Phase 3 tracker: `#56`
 - Documentation tracker: `#67`
+- Repo-local issue map: `docs/V2_ISSUE_MAP.md`
+
+Important:
+
+- Continue v2.0 implementation against GitHub issues, not only against this document.
+- Some older issue references inside Epic bodies conflict with later documentation issue numbers.
+- Use `docs/V2_ISSUE_MAP.md` as the normalized mapping before starting the next v2 slice.
 
 Core v2 epics:
 

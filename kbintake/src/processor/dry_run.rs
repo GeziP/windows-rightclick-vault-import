@@ -11,6 +11,7 @@ use crate::queue::repository::Repository;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DryRunRow {
     pub source: String,
+    pub target: Option<String>,
     pub destination: Option<String>,
     pub action: DryRunAction,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,6 +64,7 @@ pub fn preview_import(
             rows.push(row(
                 &path,
                 None,
+                None,
                 DryRunAction::SkipSymlink,
                 None,
                 None,
@@ -78,6 +80,7 @@ pub fn preview_import(
                 rows.push(row(
                     &file,
                     None,
+                    None,
                     DryRunAction::SkipSymlink,
                     None,
                     None,
@@ -91,6 +94,7 @@ pub fn preview_import(
                 Err(err) if err.to_string().contains("exceeds max size") => {
                     rows.push(row(
                         &file,
+                        None,
                         None,
                         DryRunAction::SkipSizeLimit,
                         None,
@@ -114,6 +118,7 @@ pub fn preview_import(
             if deduper::find_duplicate_record(&repo, &target.target_id, &hash)?.is_some() {
                 rows.push(row(
                     &file,
+                    Some(target.name.clone()),
                     None,
                     DryRunAction::SkipDuplicate,
                     None,
@@ -169,6 +174,7 @@ pub fn preview_import(
                 };
             rows.push(row(
                 &file,
+                Some(target.name.clone()),
                 Some(destination),
                 DryRunAction::Copy,
                 template_name,
@@ -186,11 +192,12 @@ pub fn preview_import(
 }
 
 pub fn print_table(rows: &[DryRunRow]) {
-    println!("Source Path\tDestination\tAction");
+    println!("Source Path\tTarget\tDestination\tAction");
     for row in rows {
         println!(
-            "{}\t{}\t{}",
+            "{}\t{}\t{}\t{}",
             row.source,
+            row.target.as_deref().unwrap_or("-"),
             row.destination.as_deref().unwrap_or("-"),
             row.action.as_str()
         );
@@ -199,6 +206,7 @@ pub fn print_table(rows: &[DryRunRow]) {
 
 fn row(
     path: &Path,
+    target: Option<String>,
     destination: Option<PathBuf>,
     action: DryRunAction,
     template: Option<String>,
@@ -207,6 +215,7 @@ fn row(
 ) -> DryRunRow {
     DryRunRow {
         source: path.display().to_string(),
+        target,
         destination: destination.map(|path| path.display().to_string()),
         action,
         template,
@@ -277,6 +286,7 @@ mod tests {
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
         assert_eq!(rows[0].action, DryRunAction::Copy);
+        assert_eq!(rows[0].target.as_deref(), Some("default"));
         assert!(rows[0].destination.as_ref().unwrap().ends_with("note.md"));
         assert!(rows[0].template.is_none());
         assert!(repo.list_batches(10).unwrap().is_empty());
@@ -321,6 +331,7 @@ mod tests {
         let rows = preview_import(&app, None, vec![source.clone()]).unwrap();
 
         assert_eq!(rows[0].template.as_deref(), Some("research-paper"));
+        assert_eq!(rows[0].target.as_deref(), Some("archive"));
         let expected_subfolder = chrono::Utc::now().format("references/%Y-%m-%d").to_string();
         assert_eq!(
             rows[0].rendered_subfolder.as_deref(),
@@ -370,6 +381,7 @@ mod tests {
         let rows = preview_import(&app, None, vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipDuplicate);
+        assert_eq!(rows[0].target.as_deref(), Some("default"));
         assert!(rows[0].destination.is_none());
         assert!(repo.list_batches(10).unwrap().is_empty());
     }
@@ -385,6 +397,7 @@ mod tests {
         let rows = preview_import(&app, None, vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSizeLimit);
+        assert!(rows[0].target.is_none());
         assert!(rows[0].destination.is_none());
     }
 
@@ -403,6 +416,7 @@ mod tests {
         let rows = preview_import(&app, None, vec![link]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSymlink);
+        assert!(rows[0].target.is_none());
         assert!(rows[0].destination.is_none());
     }
 }

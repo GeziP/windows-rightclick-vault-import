@@ -37,6 +37,21 @@ Current history only shows `Initial commit`, so no detailed convention exists ye
 
 Pull requests should include a concise description, testing performed, and any Windows-specific validation steps. Link related issues when available. Include screenshots or command output when changing CLI UX, registry scripts, or setup behavior.
 
+## V2 Planning Alignment
+
+For KBIntake v2.0 work, do not treat local implementation order alone as the source of truth.
+
+- Product scope source of truth: GitHub issue `#53` and `docs/PRD.md`.
+- Phase tracking source of truth: GitHub issue `#54` and `docs/V2_DEVELOPMENT_PLAN.md`.
+- Repo-local implementation tracking source of truth: `docs/V2_ISSUE_MAP.md`.
+
+Before starting or continuing v2.0 development:
+
+- check which Phase/Epic/issue the change belongs to
+- prefer developing against a specific open issue or clearly documented acceptance slice
+- verify that issue numbers referenced in older planning notes do not conflict with later documentation issues
+- update `docs/V2_ISSUE_MAP.md` when implementation status materially changes
+
 ## Security & Configuration Tips
 
 Do not commit local vault paths, generated SQLite databases, logs, or machine-specific registry exports. Treat registry scripts as privileged setup artifacts: review exact keys and executable paths before testing or requesting review.

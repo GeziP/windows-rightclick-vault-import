@@ -1380,6 +1380,7 @@ fn cli_import_dry_run_prints_preview_without_creating_batch() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Source Path"));
+    assert!(stdout.contains("Target"));
     assert!(stdout.contains("Destination"));
     assert!(stdout.contains("copy"));
 
@@ -1487,6 +1488,7 @@ fn cli_import_dry_run_json_outputs_preview_array() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value[0]["action"], "copy");
     assert_eq!(value[0]["source"], source.display().to_string());
+    assert_eq!(value[0]["target"], "default");
     assert!(value[0]["destination"]
         .as_str()
         .unwrap()
