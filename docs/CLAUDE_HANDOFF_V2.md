@@ -128,7 +128,6 @@ Current architectural verdict:
 
 ### Still open in `#58`
 
-- Watch Mode using the same routing/template engine
 - explicit zh-CN user-facing output requirements
 
 ### Recently completed in `#58`
@@ -137,6 +136,25 @@ Current architectural verdict:
 - `--template` on `explorer run-import` for per-template Explorer menu items
 - `AppConfig::resolve_import_intent()` consolidates all routing logic
 - `ImportRoutingIntent` struct replaces ad-hoc target+template resolution
+
+### Phase 1 / `#62` Watch Mode
+
+Implemented:
+
+- `kbintake watch --path <dir>` CLI command
+- `[[watch]]` config section for persistent watch paths
+- Uses `notify` crate for OS-level file events
+- Debounce layer prevents processing files still being written
+- Extension filter and template binding per watch config
+- Locked-file retry with backoff (3 attempts, 1s intervals)
+- Reuses `resolve_import_intent()` for routing/template engine
+- Queues files into existing SQLite import pipeline
+
+Still open in `#62`:
+
+- Duplicate watcher detection (PID lock file)
+- Integration with Windows Service mode for auto-start
+- Toast notification on watch import completion
 
 ### Still open in `#59`
 
@@ -171,8 +189,10 @@ keys or the DLL to be signed.
 
 ### After that:
 
-- Watch Mode (`#62`) — file system watcher that reuses the routing/template engine
-- TUI settings flow (`#60`) — GUI for editing config.toml
+- Watch Mode (`#62`) — **completed** (file system watcher)
+- TUI settings flow (`#60`) — not started
+- zh-CN localization (`#61`) — not started
+- Obsidian URI integration (`#63`) — not started
 
 ## Validation State At Handoff
 
@@ -192,8 +212,9 @@ cargo build --release --locked                 # kbintake + kbintake-com
 - `kbintake-com/src/command.rs` — IExplorerCommand vtable
 - `kbintake-com/src/server.rs` — DllGetClassObject / DllCanUnloadNow
 - `kbintake-com/src/reg.rs` — HKCR registration helpers
-- `kbintake/src/config/mod.rs` — ImportRoutingIntent + resolve_import_intent
-- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template
+- `kbintake/src/config/mod.rs` — ImportRoutingIntent + resolve_import_intent + WatchConfig
+- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template + Watch command
+- `kbintake/src/agent/watcher.rs` — Watch Mode implementation
 - `kbintake/src/processor/template.rs`
 - `kbintake/src/processor/dry_run.rs`
 - `kbintake/src/explorer/mod.rs`

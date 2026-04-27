@@ -80,8 +80,26 @@ Covered by tests:
 
 Still open for `#58`:
 
-- Watch Mode path using the same routing/template engine
 - any explicit Chinese-language error/output requirements not yet implemented
+
+### Phase 1 / Epic `#62` Watch Mode
+
+Implemented:
+
+- `kbintake watch --path <dir>` command for directory watching
+- `[[watch]]` config section for persistent watch paths
+- Uses `notify` crate for OS-level file events
+- Debounce layer prevents processing files still being written
+- Extension filter and template binding per watch config
+- Locked-file retry with backoff (3 attempts, 1s intervals)
+- Reuses `resolve_import_intent()` for routing/template engine
+- Queues files into existing SQLite import pipeline
+
+Still open for `#62`:
+
+- Duplicate watcher detection (PID lock file)
+- Integration with Windows Service mode for auto-start
+- Toast notification on watch import completion
 
 ### Phase 1 / Epic `#58` — manual template override
 
