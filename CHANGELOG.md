@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.1
+
+Patch release focused on Windows installer reliability and release verification.
+
+### Changed
+
+- Release builds now use a static CRT configuration so the shipped binaries do not depend on external VC++ runtime DLL installation.
+- Added a GitHub Actions installer validation workflow that covers NSIS build, winget manifest validation, silent install, command smoke tests, and uninstall on Windows.
+
+### Fixed
+
+- Removed the need for a separate VC++ runtime dependency to avoid clean-machine startup failures around `VCRUNTIME140.dll`.
+
 ## v1.0.0
 
 Initial v1.0 release for KBIntake, a Windows-friendly local vault import CLI and Explorer integration.

@@ -1,6 +1,6 @@
 [package]
 name = "kbintake"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "Windows-friendly CLI for right-click importing files into a local knowledge-base vault"
 
