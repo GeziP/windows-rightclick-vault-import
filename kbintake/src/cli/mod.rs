@@ -81,7 +81,25 @@ pub enum Commands {
         #[arg(long, help = "Directory to watch; can be specified multiple times")]
         path: Vec<PathBuf>,
     },
+    #[command(about = "Open interactive settings TUI")]
+    Tui,
+    #[command(about = "Obsidian URI utilities")]
+    Obsidian {
+        #[command(subcommand)]
+        command: ObsidianCommands,
+    },
     Version,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ObsidianCommands {
+    #[command(about = "Open a note in Obsidian by vault and path")]
+    Open {
+        #[arg(long, help = "Obsidian vault name")]
+        vault: String,
+        #[arg(help = "Path to the note within the vault")]
+        note: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1433,6 +1451,15 @@ fn format_timestamp(value: &str) -> String {
 pub fn handle_watch(app: &App, paths: Option<Vec<PathBuf>>) -> Result<i32> {
     crate::agent::watcher::run_watcher(app, paths)
         .map(|()| exit_codes::SUCCESS)
+}
+
+pub fn handle_obsidian(command: ObsidianCommands) -> Result<()> {
+    match command {
+        ObsidianCommands::Open { vault, note } => {
+            crate::obsidian::open_note(&vault, &note)?;
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]

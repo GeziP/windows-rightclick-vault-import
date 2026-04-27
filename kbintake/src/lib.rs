@@ -10,6 +10,8 @@ pub mod explorer;
 pub mod i18n;
 pub mod logging;
 pub mod notify;
+pub mod obsidian;
 pub mod processor;
 pub mod queue;
 pub mod service;
+pub mod tui;

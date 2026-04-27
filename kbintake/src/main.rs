@@ -83,6 +83,16 @@ fn main() -> ExitCode {
             .and_then(|app| cli::handle_config_show(&app))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
+        Commands::Tui => app::App::bootstrap_at(app_data_dir)
+            .and_then(|app| kbintake::tui::run_settings_tui(app.config))
+            .map(|()| exit_codes::SUCCESS)
+            .map_err(|err| (CommandKind::Config, err)),
+        Commands::Obsidian { command } => {
+            let kind = CommandKind::Config;
+            cli::handle_obsidian(command)
+                .map(|()| exit_codes::SUCCESS)
+                .map_err(|err| (kind, err))
+        }
         Commands::Version => {
             println!("kbintake {}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::SUCCESS)
