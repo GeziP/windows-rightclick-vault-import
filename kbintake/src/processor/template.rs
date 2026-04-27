@@ -180,12 +180,386 @@ fn render_value(value: &toml::Value, context: &TemplateRenderContext) -> toml::V
 }
 
 fn render_string(input: &str, context: &TemplateRenderContext) -> String {
-    let mut rendered = input.to_string();
+    let mut rendered = render_conditionals(input, context);
     for (name, value) in template_variables(context) {
         let needle = format!("{{{{{name}}}}}");
         rendered = rendered.replace(&needle, &value);
     }
     rendered
+}
+
+fn render_conditionals(input: &str, context: &TemplateRenderContext) -> String {
+    let mut rendered = String::new();
+    let mut cursor = 0usize;
+
+    while let Some(relative_start) = input[cursor..].find("{{#if ") {
+        let start = cursor + relative_start;
+        rendered.push_str(&input[cursor..start]);
+
+        let Some((end, condition, then_branch, else_branch)) = parse_if_block(&input[start..])
+        else {
+            rendered.push_str(&input[start..]);
+            return rendered;
+        };
+
+        let selected = if evaluate_condition(condition, context) {
+            then_branch
+        } else {
+            else_branch.unwrap_or("")
+        };
+        rendered.push_str(&render_conditionals(selected, context));
+        cursor = start + end;
+    }
+
+    rendered.push_str(&input[cursor..]);
+    rendered
+}
+
+fn parse_if_block(input: &str) -> Option<(usize, &str, &str, Option<&str>)> {
+    let header_end = input.find("}}")?;
+    let header = &input["{{#if ".len()..header_end];
+    let body_start = header_end + 2;
+    let mut cursor = body_start;
+    let mut depth = 1usize;
+    let mut else_range = None;
+
+    while cursor < input.len() {
+        let rest = &input[cursor..];
+        let next_if = rest.find("{{#if ");
+        let next_else = rest.find("{{#else}}");
+        let next_end = rest.find("{{/if}}");
+
+        let (offset, token) = [
+            next_if.map(|value| (value, TokenKind::If)),
+            next_else.map(|value| (value, TokenKind::Else)),
+            next_end.map(|value| (value, TokenKind::End)),
+        ]
+        .into_iter()
+        .flatten()
+        .min_by_key(|(value, _)| *value)?;
+
+        cursor += offset;
+        match token {
+            TokenKind::If => {
+                depth += 1;
+                cursor += "{{#if ".len();
+            }
+            TokenKind::Else => {
+                if depth == 1 && else_range.is_none() {
+                    else_range = Some((cursor, cursor + "{{#else}}".len()));
+                }
+                cursor += "{{#else}}".len();
+            }
+            TokenKind::End => {
+                depth -= 1;
+                if depth == 0 {
+                    let then_start = body_start;
+                    let end_start = cursor;
+                    let then_branch = if let Some((else_start, _)) = else_range {
+                        &input[then_start..else_start]
+                    } else {
+                        &input[then_start..end_start]
+                    };
+                    let else_branch = else_range.map(|(_, else_end)| &input[else_end..end_start]);
+                    let block_end = cursor + "{{/if}}".len();
+                    return Some((block_end, header.trim(), then_branch, else_branch));
+                }
+                cursor += "{{/if}}".len();
+            }
+        }
+    }
+
+    None
+}
+
+fn evaluate_condition(expression: &str, context: &TemplateRenderContext) -> bool {
+    let Ok(tokens) = tokenize(expression) else {
+        return false;
+    };
+    let mut parser = ConditionParser::new(tokens, context);
+    parser
+        .parse_expression()
+        .is_some_and(|value| if parser.is_at_end() { value } else { false })
+}
+
+fn tokenize(expression: &str) -> Result<Vec<ConditionToken>> {
+    let chars = expression.chars().collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch.is_whitespace() {
+            index += 1;
+            continue;
+        }
+
+        let token = match ch {
+            '(' => {
+                index += 1;
+                ConditionToken::LParen
+            }
+            ')' => {
+                index += 1;
+                ConditionToken::RParen
+            }
+            '&' if chars.get(index + 1) == Some(&'&') => {
+                index += 2;
+                ConditionToken::And
+            }
+            '|' if chars.get(index + 1) == Some(&'|') => {
+                index += 2;
+                ConditionToken::Or
+            }
+            '=' if chars.get(index + 1) == Some(&'=') => {
+                index += 2;
+                ConditionToken::Eq
+            }
+            '!' if chars.get(index + 1) == Some(&'=') => {
+                index += 2;
+                ConditionToken::Ne
+            }
+            '>' if chars.get(index + 1) == Some(&'=') => {
+                index += 2;
+                ConditionToken::Ge
+            }
+            '<' if chars.get(index + 1) == Some(&'=') => {
+                index += 2;
+                ConditionToken::Le
+            }
+            '>' => {
+                index += 1;
+                ConditionToken::Gt
+            }
+            '<' => {
+                index += 1;
+                ConditionToken::Lt
+            }
+            '"' => {
+                index += 1;
+                let start = index;
+                while index < chars.len() && chars[index] != '"' {
+                    index += 1;
+                }
+                if index >= chars.len() {
+                    bail!("unterminated string literal");
+                }
+                let value = chars[start..index].iter().collect::<String>();
+                index += 1;
+                ConditionToken::String(value)
+            }
+            _ if ch.is_ascii_digit() => {
+                let start = index;
+                while index < chars.len() && chars[index].is_ascii_digit() {
+                    index += 1;
+                }
+                ConditionToken::Number(chars[start..index].iter().collect::<String>())
+            }
+            _ => {
+                let start = index;
+                while index < chars.len()
+                    && !chars[index].is_whitespace()
+                    && !matches!(chars[index], '(' | ')' | '>' | '<' | '=' | '!' | '&' | '|')
+                {
+                    index += 1;
+                }
+                let word = chars[start..index].iter().collect::<String>();
+                match word.as_str() {
+                    "contains" => ConditionToken::Contains,
+                    _ => ConditionToken::Identifier(word),
+                }
+            }
+        };
+        tokens.push(token);
+    }
+
+    Ok(tokens)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenKind {
+    If,
+    Else,
+    End,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConditionToken {
+    Identifier(String),
+    String(String),
+    Number(String),
+    Eq,
+    Ne,
+    Gt,
+    Ge,
+    Lt,
+    Le,
+    Contains,
+    And,
+    Or,
+    LParen,
+    RParen,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConditionValue {
+    String(String),
+    Number(i64),
+}
+
+struct ConditionParser<'a> {
+    tokens: Vec<ConditionToken>,
+    current: usize,
+    context: &'a TemplateRenderContext,
+}
+
+impl<'a> ConditionParser<'a> {
+    fn new(tokens: Vec<ConditionToken>, context: &'a TemplateRenderContext) -> Self {
+        Self {
+            tokens,
+            current: 0,
+            context,
+        }
+    }
+
+    fn parse_expression(&mut self) -> Option<bool> {
+        self.parse_or()
+    }
+
+    fn parse_or(&mut self) -> Option<bool> {
+        let mut value = self.parse_and()?;
+        while self.matches(|token| matches!(token, ConditionToken::Or)) {
+            value = value || self.parse_and()?;
+        }
+        Some(value)
+    }
+
+    fn parse_and(&mut self) -> Option<bool> {
+        let mut value = self.parse_primary_bool()?;
+        while self.matches(|token| matches!(token, ConditionToken::And)) {
+            value = value && self.parse_primary_bool()?;
+        }
+        Some(value)
+    }
+
+    fn parse_primary_bool(&mut self) -> Option<bool> {
+        if self.matches(|token| matches!(token, ConditionToken::LParen)) {
+            let value = self.parse_expression()?;
+            self.consume(|token| matches!(token, ConditionToken::RParen))?;
+            return Some(value);
+        }
+
+        let left = self.parse_value()?;
+        let operator = self.advance()?.clone();
+        let right = self.parse_value()?;
+        compare_values(&left, &operator, &right)
+    }
+
+    fn parse_value(&mut self) -> Option<ConditionValue> {
+        match self.advance()?.clone() {
+            ConditionToken::Identifier(name) => Some(resolve_identifier(&name, self.context)),
+            ConditionToken::String(value) => Some(ConditionValue::String(value)),
+            ConditionToken::Number(value) => value.parse::<i64>().ok().map(ConditionValue::Number),
+            _ => None,
+        }
+    }
+
+    fn matches(&mut self, predicate: impl Fn(&ConditionToken) -> bool) -> bool {
+        if self.peek().is_some_and(predicate) {
+            self.current += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn consume(&mut self, predicate: impl Fn(&ConditionToken) -> bool) -> Option<()> {
+        if self.peek().is_some_and(predicate) {
+            self.current += 1;
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    fn advance(&mut self) -> Option<&ConditionToken> {
+        let token = self.tokens.get(self.current)?;
+        self.current += 1;
+        Some(token)
+    }
+
+    fn peek(&self) -> Option<&ConditionToken> {
+        self.tokens.get(self.current)
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.current >= self.tokens.len()
+    }
+}
+
+fn resolve_identifier(name: &str, context: &TemplateRenderContext) -> ConditionValue {
+    match name {
+        "file_name" => ConditionValue::String(source_stem(&context.source_name)),
+        "file_ext" => ConditionValue::String(
+            context
+                .file_ext
+                .clone()
+                .unwrap_or_default()
+                .to_ascii_lowercase(),
+        ),
+        "file_size_kb" => ConditionValue::Number(file_size_kb(context.file_size_bytes) as i64),
+        "imported_at" => ConditionValue::String(context.imported_at.to_rfc3339()),
+        "imported_at_date" => ConditionValue::String(
+            context
+                .imported_at
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string(),
+        ),
+        "source_path" => ConditionValue::String(context.source_path.clone()),
+        "sha256" => ConditionValue::String(context.sha256.clone()),
+        "target_name" => ConditionValue::String(context.target_name.clone()),
+        "batch_id" => ConditionValue::String(context.batch_id.clone()),
+        _ => ConditionValue::String(String::new()),
+    }
+}
+
+fn compare_values(
+    left: &ConditionValue,
+    operator: &ConditionToken,
+    right: &ConditionValue,
+) -> Option<bool> {
+    match operator {
+        ConditionToken::Eq => Some(equals_values(left, right)),
+        ConditionToken::Ne => Some(!equals_values(left, right)),
+        ConditionToken::Gt => compare_numbers(left, right).map(|(l, r)| l > r),
+        ConditionToken::Ge => compare_numbers(left, right).map(|(l, r)| l >= r),
+        ConditionToken::Lt => compare_numbers(left, right).map(|(l, r)| l < r),
+        ConditionToken::Le => compare_numbers(left, right).map(|(l, r)| l <= r),
+        ConditionToken::Contains => Some(string_value(left).contains(&string_value(right))),
+        _ => None,
+    }
+}
+
+fn equals_values(left: &ConditionValue, right: &ConditionValue) -> bool {
+    match (left, right) {
+        (ConditionValue::Number(left), ConditionValue::Number(right)) => left == right,
+        _ => string_value(left) == string_value(right),
+    }
+}
+
+fn compare_numbers(left: &ConditionValue, right: &ConditionValue) -> Option<(i64, i64)> {
+    match (left, right) {
+        (ConditionValue::Number(left), ConditionValue::Number(right)) => Some((*left, *right)),
+        _ => None,
+    }
+}
+
+fn string_value(value: &ConditionValue) -> String {
+    match value {
+        ConditionValue::String(value) => value.clone(),
+        ConditionValue::Number(value) => value.to_string(),
+    }
 }
 
 fn template_variables(context: &TemplateRenderContext) -> [(&'static str, String); 9] {
@@ -463,6 +837,64 @@ mod tests {
             rendered.frontmatter["meta"]["path"].as_str(),
             Some(r"C:\Users\dev\Downloads\attention.pdf")
         );
+    }
+
+    #[test]
+    fn renders_if_else_blocks() {
+        let mut resolved = resolve_template(&[template("capture")], "capture").unwrap();
+        resolved.frontmatter.insert(
+            "type".to_string(),
+            toml::Value::String("{{#if file_ext == \"pdf\"}}paper{{#else}}note{{/if}}".to_string()),
+        );
+
+        let rendered = render_template(&resolved, &render_context());
+
+        assert_eq!(rendered.frontmatter["type"].as_str(), Some("paper"));
+    }
+
+    #[test]
+    fn renders_conditionals_with_numeric_and_contains_operators() {
+        let mut resolved = resolve_template(&[template("capture")], "capture").unwrap();
+        resolved.frontmatter.insert(
+            "size_label".to_string(),
+            toml::Value::String(
+                "{{#if file_size_kb >= 3 && file_name contains \"tention\"}}large{{#else}}small{{/if}}"
+                    .to_string(),
+            ),
+        );
+
+        let rendered = render_template(&resolved, &render_context());
+
+        assert_eq!(rendered.frontmatter["size_label"].as_str(), Some("large"));
+    }
+
+    #[test]
+    fn renders_nested_if_blocks() {
+        let mut resolved = resolve_template(&[template("capture")], "capture").unwrap();
+        resolved.frontmatter.insert(
+            "status".to_string(),
+            toml::Value::String(
+                "{{#if file_ext == \"pdf\"}}{{#if file_size_kb > 2}}big-pdf{{#else}}small-pdf{{/if}}{{#else}}other{{/if}}"
+                    .to_string(),
+            ),
+        );
+
+        let rendered = render_template(&resolved, &render_context());
+
+        assert_eq!(rendered.frontmatter["status"].as_str(), Some("big-pdf"));
+    }
+
+    #[test]
+    fn malformed_if_expression_renders_else_branch() {
+        let mut resolved = resolve_template(&[template("capture")], "capture").unwrap();
+        resolved.frontmatter.insert(
+            "status".to_string(),
+            toml::Value::String("{{#if file_size_kb > }}good{{#else}}fallback{{/if}}".to_string()),
+        );
+
+        let rendered = render_template(&resolved, &render_context());
+
+        assert_eq!(rendered.frontmatter["status"].as_str(), Some("fallback"));
     }
 
     #[test]
