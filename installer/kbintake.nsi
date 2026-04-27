@@ -6,7 +6,7 @@
 !define APP_EXE "kbintake.exe"
 !define APP_GUI_EXE "kbintakew.exe"
 !define APP_ICON "kbintake.ico"
-!define APP_VERSION "1.0.0"
+!define APP_VERSION "1.0.1"
 !define POWERSHELL_EXE "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
 
 Name "${APP_NAME}"
