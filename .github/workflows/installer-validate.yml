@@ -74,7 +74,8 @@ jobs:
           if (-not $installerManifest) {
             throw "No winget installer manifest found."
           }
-          winget validate --manifest $installerManifest
+          $manifestDir = Split-Path $installerManifest -Parent
+          winget validate --manifest $manifestDir
 
       - name: Silent install smoke test
         shell: pwsh
