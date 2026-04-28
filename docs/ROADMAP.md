@@ -18,6 +18,30 @@ The release includes:
 - `kbintake.ico`
 - `SHA256SUMS.txt`
 
+## v2.0 Status
+
+All planned v2.0 features are implemented on branch `v2.0`:
+
+| Epic | Feature | Status |
+|------|---------|--------|
+| #57 | Windows 11 native context menu | COM DLL validated on hardware |
+| #58 | Import template system | Complete |
+| #59 | Target default subfolder | Complete |
+| #60 | TUI settings | Complete |
+| #61 | zh-CN localization | Complete |
+| #62 | Watch Mode | Complete |
+| #63 | Obsidian URI integration | Complete |
+| #64 | Quick tag injection | Complete |
+| #65 | Vault audit | Complete |
+| #66 | Clipboard import | Complete |
+
+Remaining for v2.0 release:
+
+- Documentation pass (#67)
+- Windows 11 COM DLL go/no-go decision
+- Installer update and version bump
+- Winget manifest for `2.0.0`
+
 ## Completed Milestones
 
 ### Foundation
@@ -44,10 +68,29 @@ The release includes:
 - archived targets
 - extension-based routing rules
 - per-target vault stats
+- vault audit (orphan/missing/duplicate/malformed detection)
+
+### Templates and Routing
+
+- import template system with variable interpolation and conditional rendering
+- single-level template inheritance
+- v2 multi-condition routing rules with template binding
+- v1 routing compatibility
+- per-target default subfolder
+- quick tag injection (`--tags`)
+- clipboard import (`--clipboard`)
+
+### Usability
+
+- TUI interactive settings (`kbintake tui`)
+- zh-CN localization
+- Obsidian URI integration with auto-open
+- Watch Mode with debounce, extension filter, and template binding
 
 ### Explorer And Notifications
 
 - `kbintake explorer install/uninstall`
+- Windows 11 native top-level context menu via COM DLL
 - right-click menu registration for files and folders
 - `kbintakew.exe` Windows-subsystem binary for no-console Explorer imports
 - success, duplicate, and failure toast notifications
@@ -68,44 +111,18 @@ The release includes:
 - hidden `service run` dispatcher
 - service logging under `%LOCALAPPDATA%\kbintake\logs`
 - queue processing from Windows Service mode
+- Watch Mode integration with service mode
 - manual SCM validation through `scripts/validate-service-mode.ps1`
 
-## Active Work
+## Planned Work
 
-### Issue #43: winget publication
-
-Status:
-
-- manifest files exist under `installer/winget/1.0.0`
-- installer URL points at the `v1.0.0` GitHub Release
-- installer SHA-256 matches the release asset
-- `winget validate --manifest .\installer\winget\1.0.0` passes
-- PR submitted: `https://github.com/microsoft/winget-pkgs/pull/364698`
-
-Remaining:
-
-- monitor automated validation in `microsoft/winget-pkgs`
-- run public install smoke after merge
-
-### Epic #40: v1.0 distribution and polish
-
-Mostly complete. It remains open because #43 is still open.
-
-### Epic #45: v1.x background service
-
-Service mode is implemented and validated, but the broader epic remains open for follow-up background-operation polish.
-
-## Planned Features
-
-- public winget installation through `winget install GeziP.KBIntake` after the package PR is merged
-- v2.0 development plan: `docs/V2_DEVELOPMENT_PLAN.md`
+- v2.0 release: installer update, version bump, release notes
+- Windows 11 COM DLL go/no-go for v2.0
+- Documentation pass (template gallery, config reference, CONTRIBUTING)
+- winget publication through `winget install GeziP.KBIntake` after PR merge
 - Authenticode code signing
 - installer option to install/start the Windows Service
 - reboot-resume validation for service mode
-- richer configuration editing commands for routing rules
-- improved release notes and checksum verification guidance
-- GitHub Actions dependency updates ahead of Node 20 deprecation
-- future migration tests for any new schema changes
 
 ## Known Limitations
 
@@ -114,6 +131,8 @@ Service mode is implemented and validated, but the broader epic remains open for
 - service install/start requires Administrator PowerShell
 - service reboot-resume is not yet manually validated
 - only local-folder vault targets are implemented
+- TUI watch config editing is basic (cycles from first entry)
+- COM DLL requires admin for HKCR registration
 
 ## Validation Commands
 

@@ -1,5 +1,46 @@
 # Changelog
 
+## v2.0.0 (Unreleased)
+
+Major release adding template-based imports, Watch Mode, TUI settings, localization, and Windows 11 native context menu support.
+
+### Added
+
+- Import template system with variable interpolation, conditional rendering, and single-level inheritance (`[[templates]]`, `[[routing_rules]]`)
+- Per-target `default_subfolder` configuration
+- `kbintake config validate` command for config semantic checks
+- `--template` / `-t` CLI flag for manual template override on import
+- `--tags` CLI flag for quick tag injection (comma-separated, merged with template tags)
+- `--clipboard` CLI flag to import file paths read from Windows clipboard
+- Watch Mode: `kbintake watch` monitors directories for new files with debounce, extension filter, and template binding
+- `[[watch]]` config section for persistent watch paths
+- `agent.watch_in_service` config flag for Watch Mode in Windows Service
+- `kbintake tui` interactive terminal settings with target management, import settings, watch configs, and templates tabs
+- zh-CN localization via `[import].language = "zh-CN"` config option
+- `kbintake obsidian open --vault <name> <path>` command
+- Per-target `obsidian_vault` config field and global `auto_open_obsidian` flag
+- `--open` CLI flag to open imported notes in Obsidian after import
+- `kbintake vault audit [--target] [--fix] [--json]` command detecting orphan, missing, duplicate, and malformed-frontmatter files
+- `vault audit --fix` auto-cleans manifest records without deleting vault files
+- DB schema migration 004: `stored_sha256` column for verified post-copy integrity
+- DB schema migration 005: `cli_tags` column for tag persistence
+- Windows 11 native context menu: COM DLL (`kbintake-com/`) with `IExplorerCommand` implementation
+- GHA workflow for COM DLL registry validation
+- Route-hit visibility in dry-run output, CLI output, and Explorer toast notifications
+
+### Changed
+
+- Dry-run output now shows target, matched routing rule, template destination, and frontmatter preview
+- Explorer import toast text includes routing rule context
+- SQLite schema version bumped to 5
+- `windows` crate dependency updated with `Win32_System_DataExchange` feature for clipboard support
+
+### Notes
+
+- v1 `[[routing]]` config is still supported; v2 `[[routing_rules]]` take priority
+- All 169 tests passing (117 unit + 52 integration)
+- COM DLL validated on Windows 11 physical hardware (top-level context menu, icon, install/uninstall)
+
 ## v1.0.1
 
 Patch release focused on Windows installer reliability and release verification.

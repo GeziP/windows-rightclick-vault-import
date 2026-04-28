@@ -2,7 +2,7 @@
 
 KBIntake is a Windows-first local vault importer. It lets you send files and folders into a knowledge-base vault from PowerShell or from the Windows Explorer right-click menu, while keeping an auditable SQLite job history.
 
-Current release: `v1.0.0`
+Current release: `v2.0.0` (in development on branch `v2.0`)
 
 - Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0>
 - Chinese README: [README.zh-CN.md](README.zh-CN.md)
@@ -75,6 +75,7 @@ kbintake jobs list
 ## Features
 
 - Explorer right-click import for files and folders
+- Windows 11 native top-level context menu via COM DLL
 - no-console Explorer flow through `kbintakew.exe`
 - Windows toast notifications for success, duplicate, and failure cases
 - terminal import flow with optional immediate processing
@@ -82,13 +83,22 @@ kbintake jobs list
 - SHA-256 hashing and per-target duplicate detection
 - deterministic filename conflict handling without overwriting existing files
 - multiple vault targets with add/list/show/rename/remove/set-default commands
-- extension-based routing rules in `config.toml`
-- Markdown frontmatter injection with an opt-out
+- import template system with variable interpolation and conditional rendering
+- v2 multi-condition routing rules with template binding
+- per-target default subfolder configuration
+- Markdown frontmatter injection with template-defined fields
+- `--tags` quick tag injection merged with template tags
+- `--clipboard` import file paths from Windows clipboard
 - dry-run preview with table or JSON output
 - job list/show with table or JSON output
 - retry failed jobs
 - hash-safe undo for imported batches
 - per-target vault statistics
+- `vault audit` command for orphan, missing, duplicate, and malformed frontmatter detection
+- Watch Mode: monitor directories for new files with debounce and extension filters
+- TUI interactive settings (`kbintake tui`)
+- Obsidian URI integration with auto-open after import
+- zh-CN (Chinese) localization
 - Windows Service mode for background queue processing
 - release workflow that publishes installer and binary assets
 - winget manifest copy stored under `installer/winget/`
@@ -100,6 +110,7 @@ kbintake --version
 kbintake version
 kbintake doctor [--fix] [--migrate]
 kbintake config show
+kbintake config validate
 kbintake config set-target <path> [--name <name>]
 kbintake config-show
 kbintake targets list [--include-archived]
@@ -108,12 +119,16 @@ kbintake targets add <name> <path>
 kbintake targets rename <target> <new-name>
 kbintake targets remove <target> [--force]
 kbintake targets set-default <target>
-kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
+kbintake import [--target <target>] [--template <name>] [--tags "a,b"] [--clipboard] [--process] [--dry-run] [--json] [--open] <path...>
 kbintake jobs list [--status <status>] [--limit <n>] [--json] [--table]
 kbintake jobs show <batch-id> [--json] [--table]
 kbintake jobs retry <batch-id>
 kbintake jobs undo <batch-id> [--force]
 kbintake vault stats [--target <target>] [--json]
+kbintake vault audit [--target <target>] [--fix] [--json]
+kbintake watch [--path <dir>]
+kbintake tui
+kbintake obsidian open --vault <name> <note-path>
 kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only]
 kbintake explorer uninstall
 kbintake agent
@@ -135,10 +150,15 @@ Runtime state lives in `%LOCALAPPDATA%\kbintake` by default:
 
 Important config sections:
 
-- `[[targets]]`: vault destinations
-- `[[routing]]`: extension rules, such as sending PDFs to an archive target
+- `[[targets]]`: vault destinations (with optional `default_subfolder`, `obsidian_vault`)
+- `[[templates]]`: import templates with subfolder, tags, and frontmatter
+- `[[routing_rules]]`: v2 multi-condition routing with template binding
+- `[[routing]]`: v1 extension-based routing (still supported)
+- `[[watch]]`: directories to monitor for automatic import
 - `[import].max_file_size_mb`: file size guardrail
 - `[import].inject_frontmatter`: Markdown metadata injection
+- `[import].language`: output language (`"en"` or `"zh-CN"`)
+- `[import].auto_open_obsidian`: auto-open imported notes in Obsidian
 - `[agent].poll_interval_secs`: background worker polling interval
 
 Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
@@ -224,13 +244,12 @@ Manual Windows smoke checks:
 
 ## Planned Work
 
+- v2.0 release: installer update, version bump, CHANGELOG, release notes
+- Windows 11 COM DLL physical machine validation
 - monitor the `microsoft/winget-pkgs` PR for winget publication
-- complete public winget install smoke after merge
 - code-sign release binaries to reduce SmartScreen friction
-- add first-class installer options for service install/start
+- documentation pass for v2.0 (template gallery, config reference update)
 - perform reboot-resume validation for service mode
-- improve GitHub Actions ahead of the Node 20 deprecation
-- continue E9 follow-up work around passive background operation
 
 See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 

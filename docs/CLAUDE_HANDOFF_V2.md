@@ -1,6 +1,6 @@
 # KBIntake v2.0 Handoff Notes
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 ## Purpose
 
@@ -11,25 +11,23 @@ Use this together with:
 - `docs/PRD.md`
 - `docs/V2_DEVELOPMENT_PLAN.md`
 - `docs/V2_ISSUE_MAP.md`
-- GitHub issues `#53`, `#54`, `#57`, `#58`, `#59`
+- GitHub issues `#53`–`#67`
 
 ## Current Branch State
 
 - active branch: `v2.0`
 - working tree status at handoff: clean
+- all Phase 1–3 features implemented
 
 Recent v2 commits on this branch:
 
+- `f4e903e` Add --tags, vault audit, and --clipboard features (#64, #65, #66)
+- `1653ef6` Win11 native top-level context menu + COM icon + GHA validation
 - `0f20293` Add TUI edit mode: target obsidian_vault and watch config fields
 - `098f808` Add Service Watch Mode, TUI text input, and Obsidian auto-open (#60, #62, #63)
 - `51453c6` Add TUI settings, Obsidian URI, and Watch Mode completion (#60, #62, #63)
 - `5d41f48` Add manual template override for import (#58)
 - `5a15f4d` Add kbintake-com COM DLL spike for Windows 11 native context menu
-- `a3c9004` Add v2 handoff notes for follow-up work
-- `192b34b` Add Windows 11 COM feasibility probe
-- `cc98c8d` Expose matched routing rules in previews and toasts
-- `64bb55d` Align v2 work with issue tracking
-- `36ca41b` Route v2 imports to configured targets
 - `ea5203e` Apply templates during import
 - `11c1e8e` Add template conditional rendering
 
@@ -43,235 +41,102 @@ For v2.0 work, use:
 - phase tracking: issues `#54`, `#55`, `#56`
 - normalized repo-local mapping: `docs/V2_ISSUE_MAP.md`
 
-Important constraint:
-
-- Some older Epic bodies contain stale child-issue references.
-- In particular, issue `#58` references child numbers that now overlap with later documentation issues.
-- Treat `docs/V2_ISSUE_MAP.md` as the normalization layer before picking the next slice.
-
 ## What Is Implemented
 
 ### Phase 1 / `#58` Import template system
 
-Implemented:
-
-- `templates` config section
-- `routing_rules` config section
+- `templates` and `routing_rules` config sections
 - v1 `routing` compatibility retained
-- `kbintake config validate`
-- `base_template` single-level inheritance
-- frontmatter merge/override
-- tag merge/dedupe
-- 9 built-in interpolation variables:
-  - `file_name`
-  - `file_ext`
-  - `file_size_kb`
-  - `imported_at`
-  - `imported_at_date`
-  - `source_path`
-  - `sha256`
-  - `target_name`
-  - `batch_id`
-- conditional rendering:
-  - `{{#if}}`
-  - `{{#else}}`
-  - `== != > >= < <= contains && ||`
-- dry-run template preview
-- template application during actual import
-- `routing_rules.target` wired into real import and dry-run
-- route-hit visibility:
-  - dry-run table shows `Rule`
-  - dry-run JSON shows `matched_rule_template`
-  - CLI import output can print `Routing rule: ...`
-  - Explorer toast text includes rule context
-
-Current implementation detail:
-
-- the current “rule label” surfaced to users is the matched `template` name
-- there is no separate route name field in schema yet
+- template resolution with single-level `base_template` inheritance
+- frontmatter merge/override, tag merge/dedupe
+- 9 built-in interpolation variables
+- conditional rendering (`{{#if}}` / `{{#else}}`)
+- `--template` / `-t` CLI flag
+- `routing_rules.target` wired into import and dry-run
+- route-hit visibility in previews, CLI output, and toast notifications
 
 ### Phase 1 / `#59` Target `default_subfolder`
 
-Implemented:
-
-- target `default_subfolder`
-- semantic validation for relative/non-empty values
-- subfolder priority chain:
-  - template `subfolder`
-  - target `default_subfolder`
-  - target root
-- actual import writes into computed subfolder
-- dry-run reflects computed destination
+- per-target `default_subfolder` config field
+- priority chain: template subfolder > target default_subfolder > target root
 
 ### Phase 1 / `#57` Windows 11 native context menu
 
-COM DLL proof of concept completed.
-
-Implemented:
-
-- hidden command:
-  - `kbintake explorer com-feasibility`
-- probe module:
-  - `kbintake/src/explorer/com_probe.rs`
-- spike report:
-  - `docs/WIN11_COM_FEASIBILITY.md`
-- separate COM DLL crate (`kbintake-com/`):
-  - manual vtable `IExplorerCommand` implementation
-  - `IClassFactory` for COM instantiation
-  - `DllMain`, `DllGetClassObject`, `DllCanUnloadNow` exports
-  - HKCR registration/unregistration binary
-  - `Invoke` spawns `kbintake.exe import --process` in background
-
-Current architectural verdict:
-
-- native Windows 11 `IExplorerCommand` requires a separate in-proc COM DLL
-- do **not** try to evolve the current exe-only registry registration directly into native Win11 integration
-
-## Open Gaps
-
-### Still open in `#58`
-
-(None)
-
-### Recently completed in `#58`
-
-- Explorer/manual-template flow via `--template` / `-t` CLI flag
-- `--template` on `explorer run-import` for per-template Explorer menu items
-- `AppConfig::resolve_import_intent()` consolidates all routing logic
-- `ImportRoutingIntent` struct replaces ad-hoc target+template resolution
-
-### Phase 1 / `#62` Watch Mode
-
-Implemented:
-
-- `kbintake watch --path <dir>` CLI command
-- `[[watch]]` config section for persistent watch paths
-- Uses `notify` crate for OS-level file events
-- Debounce layer prevents processing files still being written
-- Extension filter and template binding per watch config
-- Locked-file retry with backoff (3 attempts, 1s intervals)
-- Reuses `resolve_import_intent()` for routing/template engine
-- Queues files into existing SQLite import pipeline
-- Windows Service integration: `agent.watch_in_service` config flag
-  spawns watcher thread alongside queue processor
-- `Arc<AtomicBool>` shutdown flag for graceful service stop
-
-Still open in `#62`:
-
-(None)
+- COM DLL crate (`kbintake-com/`) with `IExplorerCommand` implementation
+- Top-level context menu (not under "Show more options")
+- Icon support via `GetIcon`
+- GHA validation workflow
+- Validated on Windows 11 physical hardware
 
 ### Phase 1 / `#60` TUI settings
 
-Implemented:
-
-- `kbintake tui` — interactive terminal settings interface
-- Tabbed layout: Targets, Import, Watch, Templates
-- Keyboard shortcuts: q/Esc quit, 1-4 switch tabs, s save, a add, r remove, d default, e edit, f toggle frontmatter, l language, +/- size
-- Text input overlay for adding targets (name + path) and watch paths
-- Edit mode: `e` key edits target `obsidian_vault` and cycles through watch config fields
-- Targets table includes Vault column
-- `ratatui` + `crossterm` dependencies
-- All labels localized
-
-Still open in `#60`:
-
-- More advanced editing of template frontmatter
-- Editing existing watch configs by index (currently cycles from first entry)
-
-### Phase 1 / `#63` Obsidian URI integration
-
-Implemented:
-
-- `kbintake obsidian open --vault <name> <note_path>`
-- Cross-platform URI launch
-- URL encoding via `urlencoding` crate
-- Per-target `obsidian_vault` config field
-- Global `[import].auto_open_obsidian` flag
-- `--open` CLI flag for explicit per-import override
-- Auto-opens markdown notes after successful import
+- `kbintake tui` interactive settings with tabs for Targets, Import, Watch, Templates
+- Text input overlay, edit mode for `obsidian_vault` and watch config fields
 
 ### Phase 1 / `#61` zh-CN localization
 
-Implemented:
+- `[import].language` config option
+- All CLI output, toast, and TUI labels translated
 
-- `kbintake/src/i18n.rs` — `tr(key, lang)` translation function with en/zh-CN dictionaries
-- `[import].language` config field, defaults to `"en"`
-- All CLI output, toast notifications, and error messages localized
-- Set `language = "zh-CN"` in `config.toml` to enable Chinese output
+### Phase 1 / `#62` Watch Mode
 
-### Still open in `#59`
+- `kbintake watch` CLI command with `[[watch]]` config
+- Debounce, extension filter, template binding, locked-file retry
+- Service integration via `agent.watch_in_service`
 
-- confirm `doctor` behavior is sufficient for target subfolder validation UX
-- no TUI/settings flow exists yet for editing these fields
+### Phase 1 / `#63` Obsidian URI integration
 
-### Still open in `#57`
+- `kbintake obsidian open --vault <name> <path>`
+- Per-target `obsidian_vault`, global `auto_open_obsidian`, `--open` CLI flag
+- Auto-open after successful markdown import
 
-- separate DLL proof of concept — **COMPLETED** (`kbintake-com` crate)
-- real install/uninstall validation on Windows 11
-- go/no-go decision for v2.0 vs v2.1
+### Phase 2/3 / `#64` Quick tag injection
+
+- `--tags "urgent,alpha"` CLI flag
+- DB migration 005: `cli_tags` column
+- Tags merged with template tags (case-insensitive dedup)
+
+### Phase 2/3 / `#65` Vault audit
+
+- `kbintake vault audit [--target] [--fix] [--json]`
+- Detects orphan, missing, duplicate, malformed frontmatter
+- `--fix` cleans manifest without deleting vault files
+
+### Phase 2/3 / `#66` Clipboard import
+
+- `--clipboard` CLI flag reads file paths from Windows clipboard
+- Win32 `DataExchange` API
 
 ## Recommended Next Step
 
-The most justified next slice is:
+All planned v2.0 features are implemented. Next steps:
 
-### Real Windows 11 validation of the COM DLL (`#57`)
-
-The `kbintake-com` crate compiles and passes all checks. The next step is to register
-it on a real Windows 11 machine and verify:
-
-1. `kbintake-com-reg install` works on a live Windows 11 system
-2. Right-click "Show more options" → "Add to Knowledge Base" appears
-3. Selecting files and clicking the menu item triggers `kbintake.exe import --process`
-4. Import succeeds and toast notification appears
-5. `kbintake-com-reg uninstall` cleans up all registry keys
-
-If Windows 11 native `IExplorerCommand` integration (top-level context menu without
-"Show more options") is desired, further work is needed to ensure the COM DLL is
-properly recognized by Windows 11's new Explorer. This may require additional registry
-keys or the DLL to be signed.
-
-### After that:
-
-- TUI enhancements: full text input for watch configs (target/debounce/extensions/template)
-- Config-level `obsidian_vault` binding per target (#63) — field exists, UX for setting it in TUI is basic
-- COM DLL real install/uninstall validation on Windows 11 (`#57`)
+1. **Documentation pass** (`#67`): template gallery, config reference, CONTRIBUTING
+2. **Windows 11 COM DLL go/no-go**: decide if it ships in v2.0 or v2.1
+3. **Release preparation** (`#56`): version bump, installer update, winget manifest, release notes
 
 ## Validation State At Handoff
 
-Most recent successful validations:
-
 ```powershell
-cargo test --locked                            # 165 tests (113 unit + 52 integration)
-cargo clippy --all-targets --all-features -- -D warnings
-cargo build --release                          # kbintake + kbintake-com
+cargo test --locked                            # 169 tests (117 unit + 52 integration)
+cargo clippy --all-targets --all-features -- -D warnings  # clean
+cargo fmt --all -- --check                     # clean
+cargo build --release --locked --bins          # kbintake + kbintake-com
 ```
-
-All three remaining Phase 1 features implemented and verified.
 
 ## Files Most Relevant To Continue From
 
 - `docs/V2_ISSUE_MAP.md`
 - `docs/WIN11_COM_FEASIBILITY.md`
 - `kbintake-com/src/command.rs` — IExplorerCommand vtable
-- `kbintake-com/src/server.rs` — DllGetClassObject / DllCanUnloadNow
 - `kbintake-com/src/reg.rs` — HKCR registration helpers
 - `kbintake/src/config/mod.rs` — ImportRoutingIntent + resolve_import_intent + WatchConfig + language
-- `kbintake/src/cli/mod.rs` -- Import/RunImport with --template + Watch/Obsidian/TUI commands + i18n
-- `kbintake/src/agent/watcher.rs` — Watch Mode with PID lock + toast notifications
-- `kbintake/src/i18n.rs` — zh-CN translation dictionary and tr() function
-- `kbintake/src/tui/mod.rs` — Interactive TUI settings
+- `kbintake/src/cli/mod.rs` — all CLI handlers with --template, --tags, --clipboard, vault audit
+- `kbintake/src/processor/audit.rs` — vault audit logic
+- `kbintake/src/processor/template.rs` — template rendering with CLI tags merge
+- `kbintake/src/clipboard.rs` — Windows clipboard reader
+- `kbintake/src/agent/watcher.rs` — Watch Mode with PID lock + toast
+- `kbintake/src/i18n.rs` — en/zh-CN translation dictionaries
+- `kbintake/src/tui/mod.rs` — interactive TUI settings
 - `kbintake/src/obsidian.rs` — Obsidian URI integration
-- `kbintake/src/processor/template.rs`
-- `kbintake/src/processor/dry_run.rs`
-- `kbintake/src/explorer/mod.rs`
-- `kbintake/tests/mvp_flow.rs`
-
-## Handoff Guidance
-
-Before writing the next v2.0 code:
-
-1. read `docs/V2_ISSUE_MAP.md`
-2. pick the governing issue
-3. verify the issue body does not contain stale child references
-4. implement a narrow slice
-5. update `docs/V2_ISSUE_MAP.md` after the slice lands
+- `kbintake/tests/mvp_flow.rs` — integration tests
