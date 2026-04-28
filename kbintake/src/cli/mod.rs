@@ -241,8 +241,6 @@ pub enum ExplorerCommands {
         tags: Option<String>,
         paths: Vec<PathBuf>,
     },
-    #[command(hide = true, about = "Launch TUI settings from Explorer context menu")]
-    Settings,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1335,9 +1333,6 @@ pub fn handle_explorer(command: ExplorerCommands, lang: &str) -> Result<()> {
         }
         ExplorerCommands::RunImport { .. } => {
             anyhow::bail!("{}", tr("cli.explorer_run_import_hidden", lang))
-        }
-        ExplorerCommands::Settings => {
-            anyhow::bail!("explorer settings is only intended for the hidden GUI launcher")
         }
     }
 }

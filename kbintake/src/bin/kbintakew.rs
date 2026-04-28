@@ -97,20 +97,6 @@ fn main() -> ExitCode {
                 cli::handle_explorer_run_import_error(&err);
                 (CommandKind::Explorer, err)
             }),
-        Commands::Explorer {
-            command: ExplorerCommands::Settings,
-        } => {
-            let data_dir = app_data_dir
-                .clone()
-                .unwrap_or_else(kbintake::config::default_app_data_dir);
-            kbintake::config::AppConfig::load_or_init_in(data_dir)
-                .map_err(|err| (CommandKind::Config, err))
-                .and_then(|config| {
-                    kbintake::tui::run_settings_tui(config)
-                        .map(|()| exit_codes::SUCCESS)
-                        .map_err(|err| (CommandKind::Config, err))
-                })
-        }
         Commands::Explorer { command } => {
             let data_dir = app_data_dir
                 .clone()

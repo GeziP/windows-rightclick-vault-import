@@ -152,8 +152,6 @@ fn en(key: &str) -> &'static str {
         // -- Explorer --
         "explorer.install_unsupported" => "Explorer context-menu installation is only supported on Windows",
         "explorer.uninstall_unsupported" => "Explorer context-menu uninstallation is only supported on Windows",
-        "explorer.menu_file" => "Add to Knowledge Base",
-        "explorer.menu_dir" => "Add Folder to Knowledge Base",
         "explorer.menu_title" => "KBIntake",
         "explorer.sub_import" => "Import",
         "explorer.sub_queue" => "Queue",
@@ -336,8 +334,6 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         // -- Explorer --
         "explorer.install_unsupported" => Some("Explorer 右键菜单安装仅在 Windows 上支持"),
         "explorer.uninstall_unsupported" => Some("Explorer 右键菜单卸载仅在 Windows 上支持"),
-        "explorer.menu_file" => Some("添加到知识库"),
-        "explorer.menu_dir" => Some("添加文件夹到知识库"),
         "explorer.menu_title" => Some("KBIntake"),
         "explorer.sub_import" => Some("导入处理"),
         "explorer.sub_queue" => Some("仅入队"),

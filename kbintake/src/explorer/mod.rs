@@ -7,6 +7,9 @@ use anyhow::{Context, Result};
 pub const FILE_MENU_KEY: &str = r"Software\Classes\*\shell\KBIntake2";
 pub const DIR_MENU_KEY: &str = r"Software\Classes\Directory\shell\KBIntake2";
 
+const LEGACY_FILE_MENU_KEY: &str = r"Software\Classes\*\shell\KBIntake";
+const LEGACY_DIR_MENU_KEY: &str = r"Software\Classes\Directory\shell\KBIntake";
+
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
     pub exe_path: PathBuf,
@@ -110,6 +113,17 @@ fn escape_command_path(path: &Path) -> String {
 }
 
 #[cfg(windows)]
+fn delete_keys_quiet(hkcu: &winreg::RegKey, keys: impl IntoIterator<Item = &'static str>) {
+    use std::io::ErrorKind;
+    for key in keys {
+        let _ = match hkcu.delete_subkey_all(key) {
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            other => other,
+        };
+    }
+}
+
+#[cfg(windows)]
 pub fn is_installed() -> Result<bool> {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
@@ -129,6 +143,10 @@ pub fn install(options: &InstallOptions) -> Result<Vec<CascadingMenu>> {
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+
+    // Clean up v1.0 legacy keys before installing new cascading menu
+    delete_keys_quiet(&hkcu, [LEGACY_FILE_MENU_KEY, LEGACY_DIR_MENU_KEY]);
+
     let menus = build_cascading_registrations(options);
 
     for menu in &menus {
@@ -184,7 +202,12 @@ pub fn uninstall() -> Result<()> {
     use winreg::RegKey;
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    for key in [FILE_MENU_KEY, DIR_MENU_KEY] {
+    for key in [
+        FILE_MENU_KEY,
+        DIR_MENU_KEY,
+        LEGACY_FILE_MENU_KEY,
+        LEGACY_DIR_MENU_KEY,
+    ] {
         match hkcu.delete_subkey_all(key) {
             Ok(()) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => {}
