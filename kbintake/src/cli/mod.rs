@@ -1287,14 +1287,14 @@ fn open_successful_notes_in_obsidian(app: &App, batch_id: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
+pub fn handle_explorer(command: ExplorerCommands, lang: &str) -> Result<()> {
     match command {
         ExplorerCommands::Install {
             exe_path,
             icon_path,
             queue_only,
         } => {
-            let mut options = crate::explorer::default_install_options(queue_only)?;
+            let mut options = crate::explorer::default_install_options(queue_only, lang)?;
             if let Some(exe_path) = exe_path {
                 options.exe_path = exe_path;
                 if icon_path.is_none() {
@@ -1308,29 +1308,33 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
 
             let registrations = crate::explorer::install(&options)?;
             for registration in registrations {
-                println!("Registered: HKCU\\{}", registration.menu_key);
-                println!("Command: {}", registration.command);
+                println!(
+                    "{}",
+                    tr("cli.registered", lang)
+                        .replace("HKCU\\", &format!("HKCU\\{}", registration.menu_key))
+                );
+                println!("{}: {}", tr("cli.command", lang), registration.command);
                 if let Some(icon_path) = registration.icon_path {
-                    println!("Icon: {}", icon_path.display());
+                    println!("{}: {}", tr("cli.icon", lang), icon_path.display());
                 }
             }
             Ok(())
         }
         ExplorerCommands::Uninstall => {
             crate::explorer::uninstall()?;
-            println!("Removed Explorer context-menu entries");
+            println!("{}", tr("cli.explorer_removed", lang));
             Ok(())
         }
         ExplorerCommands::ComFeasibility => {
             let report = crate::explorer::com_probe::probe()?;
-            println!("Windows 11 Explorer COM feasibility probe");
+            println!("{}", tr("cli.com_feasibility", lang));
             for line in report.lines() {
                 println!("{line}");
             }
             Ok(())
         }
         ExplorerCommands::RunImport { .. } => {
-            anyhow::bail!("explorer run-import is only intended for the hidden GUI launcher")
+            anyhow::bail!("{}", tr("cli.explorer_run_import_hidden", lang))
         }
     }
 }
@@ -2394,6 +2398,6 @@ mod tests {
 
     #[test]
     fn explorer_com_feasibility_command_executes() {
-        handle_explorer(super::ExplorerCommands::ComFeasibility).unwrap();
+        handle_explorer(super::ExplorerCommands::ComFeasibility, "en").unwrap();
     }
 }

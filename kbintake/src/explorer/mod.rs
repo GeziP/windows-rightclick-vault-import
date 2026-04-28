@@ -9,26 +9,24 @@ pub const FILE_COMMAND_KEY: &str = r"Software\Classes\*\shell\KBIntake\command";
 pub const DIR_MENU_KEY: &str = r"Software\Classes\Directory\shell\KBIntake";
 pub const DIR_COMMAND_KEY: &str = r"Software\Classes\Directory\shell\KBIntake\command";
 
-const FILE_MENU_TITLE: &str = "Add to Knowledge Base";
-const DIR_MENU_TITLE: &str = "Add Folder to Knowledge Base";
-
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
     pub exe_path: PathBuf,
     pub icon_path: Option<PathBuf>,
     pub process: bool,
+    pub lang: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuRegistration {
     pub menu_key: &'static str,
     pub command_key: &'static str,
-    pub title: &'static str,
+    pub title: String,
     pub command: String,
     pub icon_path: Option<PathBuf>,
 }
 
-pub fn default_install_options(queue_only: bool) -> Result<InstallOptions> {
+pub fn default_install_options(queue_only: bool, lang: &str) -> Result<InstallOptions> {
     let current_exe =
         std::env::current_exe().context("failed to resolve current executable path")?;
     let exe_path = discover_gui_exe_next_to_exe(&current_exe).unwrap_or(current_exe);
@@ -37,23 +35,26 @@ pub fn default_install_options(queue_only: bool) -> Result<InstallOptions> {
         exe_path,
         icon_path,
         process: !queue_only,
+        lang: lang.to_string(),
     })
 }
 
 pub fn build_registrations(options: &InstallOptions) -> Vec<MenuRegistration> {
     let command = build_import_command(&options.exe_path, options.process);
+    let file_title = crate::i18n::tr("explorer.menu_file", &options.lang);
+    let dir_title = crate::i18n::tr("explorer.menu_dir", &options.lang);
     vec![
         MenuRegistration {
             menu_key: FILE_MENU_KEY,
             command_key: FILE_COMMAND_KEY,
-            title: FILE_MENU_TITLE,
+            title: file_title,
             command: command.clone(),
             icon_path: options.icon_path.clone(),
         },
         MenuRegistration {
             menu_key: DIR_MENU_KEY,
             command_key: DIR_COMMAND_KEY,
-            title: DIR_MENU_TITLE,
+            title: dir_title,
             command,
             icon_path: options.icon_path.clone(),
         },
@@ -204,6 +205,7 @@ mod tests {
             exe_path: PathBuf::from(r"C:\Tools\kbintake.exe"),
             icon_path: Some(PathBuf::from(r"C:\Tools\kbintake.ico")),
             process: true,
+            lang: "en".to_string(),
         };
 
         let registrations = build_registrations(&options);

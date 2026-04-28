@@ -77,9 +77,19 @@ fn main() -> ExitCode {
             .and_then(|app| cli::handle_vault(&app, command))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Vault, err)),
-        Commands::Explorer { command } => cli::handle_explorer(command)
-            .map(|()| exit_codes::SUCCESS)
-            .map_err(|err| (CommandKind::Explorer, err)),
+        Commands::Explorer { command } => {
+            let lang = app_data_dir
+                .as_ref()
+                .and_then(|dir| {
+                    app::App::bootstrap_at(Some(dir.clone()))
+                        .ok()
+                        .map(|app| app.config.language().to_string())
+                })
+                .unwrap_or_else(|| "en".to_string());
+            cli::handle_explorer(command, &lang)
+                .map(|()| exit_codes::SUCCESS)
+                .map_err(|err| (CommandKind::Explorer, err))
+        }
         Commands::Service { command } => {
             handle_service_command(command, app_data_dir).map_err(|err| (CommandKind::Service, err))
         }
