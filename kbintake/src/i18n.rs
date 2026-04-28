@@ -147,6 +147,10 @@ fn en(key: &str) -> &'static str {
         "tui.prompt_watch_extensions" => "Extensions (comma-separated, empty = all)",
         "tui.prompt_watch_debounce" => "Debounce seconds",
         "tui.prompt_watch_template" => "Template name (empty = none)",
+        "tui.desc_targets" => "Files are imported into the default (*) target vault. Press [e] to set Obsidian vault name for selected target.",
+        "tui.desc_import" => "Configure global import behavior. Changes apply to all future imports.",
+        "tui.desc_watch" => "Watched directories auto-import new files. Select a row and press the field key to edit.",
+        "tui.desc_templates" => "Templates control subfolder, tags, and frontmatter for imports. Configured in config.toml.",
 
         // -- Watcher --
         "watcher.duplicate" => "Another watcher instance is already running.",
@@ -348,6 +352,10 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "tui.prompt_watch_extensions" => Some("扩展名（逗号分隔，空=全部）"),
         "tui.prompt_watch_debounce" => Some("防抖秒数"),
         "tui.prompt_watch_template" => Some("模板名称（空=无）"),
+        "tui.desc_targets" => Some("文件会导入到默认 (*) 目标库。选中一行后按 [e] 可设置该目标的 Obsidian vault 名称。"),
+        "tui.desc_import" => Some("配置全局导入行为。修改后对所有后续导入生效。"),
+        "tui.desc_watch" => Some("被监控的目录会自动导入新文件。选中一行后按对应字段按键即可编辑。"),
+        "tui.desc_templates" => Some("模板控制导入时的子文件夹、标签和 frontmatter。需在 config.toml 中配置。"),
 
         // -- Watcher --
         "watcher.duplicate" => Some("已有另一个监控实例在运行。"),

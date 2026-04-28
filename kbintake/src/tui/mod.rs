@@ -569,6 +569,18 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
 
 fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
     let lang = ui.lang();
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(area);
+
+    // Description
+    let desc = Paragraph::new(Span::styled(
+        tr("tui.desc_targets", lang),
+        Style::default().fg(Color::Cyan),
+    ));
+    frame.render_widget(desc, chunks[0]);
+
     let header = Row::new(vec![
         Cell::from(tr("tui.default_col", lang)),
         Cell::from(tr("tui.name_col", lang)),
@@ -620,7 +632,7 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
             .borders(Borders::ALL)
             .title(tr("tui.tab_targets", lang)),
     );
-    frame.render_widget(table, area);
+    frame.render_widget(table, chunks[1]);
 }
 
 fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
@@ -638,12 +650,18 @@ fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
     };
 
     let lines = vec![
+        Line::from(Span::styled(
+            tr("tui.desc_import", lang),
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(Span::default()),
         Line::from(vec![
             Span::styled(
                 format!("{} ", tr("tui.max_file_size", lang)),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!("{} MB", ui.config.import.max_file_size_mb)),
+            Span::styled("  [+/-]", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(vec![
             Span::styled(
@@ -651,6 +669,7 @@ fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(fm_status),
+            Span::styled("  [f]", Style::default().fg(Color::DarkGray)),
         ]),
         Line::from(vec![
             Span::styled(
@@ -658,23 +677,7 @@ fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
                 Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(lang_label),
-        ]),
-        Line::from(Span::default()),
-        Line::from(vec![
-            Span::styled("[+]", Style::default().fg(Color::Green)),
-            Span::raw(format!(" {}", tr("tui.size_up", lang))),
-        ]),
-        Line::from(vec![
-            Span::styled("[-]", Style::default().fg(Color::Red)),
-            Span::raw(format!(" {}", tr("tui.size_down", lang))),
-        ]),
-        Line::from(vec![
-            Span::styled("[f]", Style::default().fg(Color::Yellow)),
-            Span::raw(format!(" {}", tr("tui.toggle_frontmatter", lang))),
-        ]),
-        Line::from(vec![
-            Span::styled("[l]", Style::default().fg(Color::Yellow)),
-            Span::raw(format!(" {}", tr("tui.toggle_language", lang))),
+            Span::styled("  [l]", Style::default().fg(Color::DarkGray)),
         ]),
     ];
     let para = Paragraph::new(lines).block(
@@ -688,7 +691,15 @@ fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
 fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
     let lang = ui.lang();
     if ui.config.watch.is_empty() {
-        let para = Paragraph::new(tr("tui.no_watch_configs", lang)).block(
+        let lines = vec![
+            Line::from(Span::styled(
+                tr("tui.desc_watch", lang),
+                Style::default().fg(Color::Cyan),
+            )),
+            Line::from(Span::default()),
+            Line::from(tr("tui.no_watch_configs", lang)),
+        ];
+        let para = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(tr("tui.tab_watch", lang)),
@@ -696,6 +707,18 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
         frame.render_widget(para, area);
         return;
     }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(area);
+
+    // Description
+    let desc = Paragraph::new(Span::styled(
+        tr("tui.desc_watch", lang),
+        Style::default().fg(Color::Cyan),
+    ));
+    frame.render_widget(desc, chunks[0]);
 
     let header = Row::new(vec![
         Cell::from(tr("tui.path_col", lang)),
@@ -748,13 +771,21 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
             .borders(Borders::ALL)
             .title(tr("tui.tab_watch", lang)),
     );
-    frame.render_widget(table, area);
+    frame.render_widget(table, chunks[1]);
 }
 
 fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
     let lang = ui.lang();
     if ui.config.templates.is_empty() {
-        let para = Paragraph::new(tr("tui.no_templates", lang)).block(
+        let lines = vec![
+            Line::from(Span::styled(
+                tr("tui.desc_templates", lang),
+                Style::default().fg(Color::Cyan),
+            )),
+            Line::from(Span::default()),
+            Line::from(tr("tui.no_templates", lang)),
+        ];
+        let para = Paragraph::new(lines).block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(tr("tui.tab_templates", lang)),
@@ -762,6 +793,17 @@ fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
         frame.render_widget(para, area);
         return;
     }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(area);
+
+    let desc = Paragraph::new(Span::styled(
+        tr("tui.desc_templates", lang),
+        Style::default().fg(Color::Cyan),
+    ));
+    frame.render_widget(desc, chunks[0]);
 
     let header = Row::new(vec![
         Cell::from(tr("tui.name_col", lang)),
@@ -800,7 +842,7 @@ fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
             .borders(Borders::ALL)
             .title(tr("tui.tab_templates", lang)),
     );
-    frame.render_widget(table, area);
+    frame.render_widget(table, chunks[1]);
 }
 
 // --- Action handlers ---
