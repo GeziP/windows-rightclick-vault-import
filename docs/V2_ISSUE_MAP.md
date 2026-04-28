@@ -115,7 +115,7 @@ Implemented:
 
 Still open for `#60`:
 
-- Full text input for watch configs (target, debounce, extensions, template fields)
+- Editing existing watch configs by row index (currently cycles from first entry)
 - More advanced editing of template frontmatter
 
 ### Phase 1 / Epic `#63` Obsidian URI integration
@@ -133,7 +133,7 @@ Implemented:
 
 Still open for `#63`:
 
-- TUI/UX for setting `obsidian_vault` on targets (field exists, but no dedicated editor)
+(None — field exists and is editable via config.toml or TUI 'e' key on Targets tab)
 
 ### Phase 1 / Epic `#61` zh-CN localization
 

@@ -20,6 +20,7 @@ Use this together with:
 
 Recent v2 commits on this branch:
 
+- `0f20293` Add TUI edit mode: target obsidian_vault and watch config fields
 - `098f808` Add Service Watch Mode, TUI text input, and Obsidian auto-open (#60, #62, #63)
 - `51453c6` Add TUI settings, Obsidian URI, and Watch Mode completion (#60, #62, #63)
 - `5d41f48` Add manual template override for import (#58)
@@ -165,10 +166,17 @@ Implemented:
 
 - `kbintake tui` — interactive terminal settings interface
 - Tabbed layout: Targets, Import, Watch, Templates
-- Keyboard shortcuts for navigation, save, target management
+- Keyboard shortcuts: q/Esc quit, 1-4 switch tabs, s save, a add, r remove, d default, e edit, f toggle frontmatter, l language, +/- size
 - Text input overlay for adding targets (name + path) and watch paths
+- Edit mode: `e` key edits target `obsidian_vault` and cycles through watch config fields
+- Targets table includes Vault column
 - `ratatui` + `crossterm` dependencies
 - All labels localized
+
+Still open in `#60`:
+
+- More advanced editing of template frontmatter
+- Editing existing watch configs by index (currently cycles from first entry)
 
 ### Phase 1 / `#63` Obsidian URI integration
 
