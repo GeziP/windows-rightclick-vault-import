@@ -1309,9 +1309,9 @@ pub fn handle_explorer(command: ExplorerCommands, lang: &str) -> Result<()> {
             let registrations = crate::explorer::install(&options)?;
             for registration in registrations {
                 println!(
-                    "{}",
-                    tr("cli.registered", lang)
-                        .replace("HKCU\\", &format!("HKCU\\{}", registration.menu_key))
+                    "{}: HKCU\\{}",
+                    tr("cli.registered", lang),
+                    registration.menu_key
                 );
                 println!("{}: {}", tr("cli.command", lang), registration.command);
                 if let Some(icon_path) = registration.icon_path {

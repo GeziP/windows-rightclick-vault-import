@@ -98,13 +98,12 @@ fn main() -> ExitCode {
                 (CommandKind::Explorer, err)
             }),
         Commands::Explorer { command } => {
-            let lang = app_data_dir
-                .as_ref()
-                .and_then(|dir| {
-                    app::App::bootstrap_at(Some(dir.clone()))
-                        .ok()
-                        .map(|app| app.config.language().to_string())
-                })
+            let data_dir = app_data_dir
+                .clone()
+                .unwrap_or_else(kbintake::config::default_app_data_dir);
+            let lang = kbintake::config::AppConfig::load_or_init_in(data_dir)
+                .ok()
+                .map(|config| config.language().to_string())
                 .unwrap_or_else(|| "en".to_string());
             cli::handle_explorer(command, &lang)
                 .map(|()| exit_codes::SUCCESS)
