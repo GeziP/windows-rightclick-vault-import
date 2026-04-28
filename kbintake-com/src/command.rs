@@ -4,10 +4,10 @@
 //! for IExplorerCommand in a usable way.
 
 use std::ffi::c_void;
-use windows::core::{GUID, HRESULT};
 use windows::core::Interface;
+use windows::core::{GUID, HRESULT};
 use windows::Win32::System::Com::CoTaskMemAlloc;
-use windows::Win32::UI::Shell::{IShellItemArray, SIGDN_FILESYSPATH, ECS_ENABLED};
+use windows::Win32::UI::Shell::{IShellItemArray, ECS_ENABLED, SIGDN_FILESYSPATH};
 
 // COM HRESULT constants (u32 cast to i32 to avoid literal overflow).
 const E_INVALIDARG: HRESULT = HRESULT(0x80070057u32 as i32);
@@ -23,7 +23,8 @@ pub const CLSID_KBINTAKE_COMMAND: GUID = GUID::from_u128(0xA1B2_C3D4_E5F6_7890_A
 #[repr(C)]
 struct ExplorerCommandVtbl {
     // IUnknown
-    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    query_interface:
+        unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
     add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
     release: unsafe extern "system" fn(*mut c_void) -> u32,
     // IExplorerCommand
@@ -63,7 +64,11 @@ const IID_IUNKNOWN: GUID = GUID::from_u128(0x00000000_0000_0000_C000_00000000004
 // IExplorerCommand IID: {a08ce4d0-fa25-44ab-b57c-c7b1c323e0b9}
 const IID_IEXPLORER_COMMAND: GUID = GUID::from_u128(0xa08ce4d0_fa25_44ab_b57c_c7b1c323e0b9);
 
-unsafe extern "system" fn cmd_query_interface(this: *mut c_void, riid: *const GUID, ppv: *mut *mut c_void) -> HRESULT {
+unsafe extern "system" fn cmd_query_interface(
+    this: *mut c_void,
+    riid: *const GUID,
+    ppv: *mut *mut c_void,
+) -> HRESULT {
     if riid.is_null() || ppv.is_null() {
         return E_INVALIDARG;
     }
@@ -80,28 +85,54 @@ unsafe extern "system" fn cmd_query_interface(this: *mut c_void, riid: *const GU
 
 unsafe extern "system" fn cmd_add_ref(this: *mut c_void) -> u32 {
     let handler = &mut *(this as *mut ExplorerCommandHandler);
-    handler.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u32 + 1
+    handler
+        .ref_count
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u32
+        + 1
 }
 
 unsafe extern "system" fn cmd_release(this: *mut c_void) -> u32 {
     let handler = &mut *(this as *mut ExplorerCommandHandler);
-    let new_count = handler.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) as u32 - 1;
+    let new_count = handler
+        .ref_count
+        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst) as u32
+        - 1;
     if new_count == 0 {
         drop(Box::from_raw(this as *mut ExplorerCommandHandler));
     }
     new_count
 }
 
-unsafe extern "system" fn cmd_get_title(_this: *mut c_void, _psi: *mut c_void, ppsz_name: *mut *mut u16) -> HRESULT {
+unsafe extern "system" fn cmd_get_title(
+    _this: *mut c_void,
+    _psi: *mut c_void,
+    ppsz_name: *mut *mut u16,
+) -> HRESULT {
     if ppsz_name.is_null() {
         return E_INVALIDARG;
     }
     const TITLE: &[u16] = &[
-        b'A' as u16, b'd' as u16, b'd' as u16, b' ' as u16,
-        b't' as u16, b'o' as u16, b' ' as u16,
-        b'K' as u16, b'n' as u16, b'o' as u16, b'w' as u16,
-        b'l' as u16, b'e' as u16, b'd' as u16, b'g' as u16, b'e' as u16,
-        b' ' as u16, b'B' as u16, b'a' as u16, b's' as u16, b'e' as u16,
+        b'A' as u16,
+        b'd' as u16,
+        b'd' as u16,
+        b' ' as u16,
+        b't' as u16,
+        b'o' as u16,
+        b' ' as u16,
+        b'K' as u16,
+        b'n' as u16,
+        b'o' as u16,
+        b'w' as u16,
+        b'l' as u16,
+        b'e' as u16,
+        b'd' as u16,
+        b'g' as u16,
+        b'e' as u16,
+        b' ' as u16,
+        b'B' as u16,
+        b'a' as u16,
+        b's' as u16,
+        b'e' as u16,
         0,
     ];
     let ptr = unsafe { CoTaskMemAlloc(TITLE.len() * 2) } as *mut u16;
@@ -113,26 +144,72 @@ unsafe extern "system" fn cmd_get_title(_this: *mut c_void, _psi: *mut c_void, p
     S_OK
 }
 
-unsafe extern "system" fn cmd_get_icon(_this: *mut c_void, _psi: *mut c_void, ppsz_icon: *mut *mut u16) -> HRESULT {
+unsafe extern "system" fn cmd_get_icon(
+    _this: *mut c_void,
+    _psi: *mut c_void,
+    ppsz_icon: *mut *mut u16,
+) -> HRESULT {
     if ppsz_icon.is_null() {
         return E_INVALIDARG;
     }
-    *ppsz_icon = std::ptr::null_mut();
-    S_OK
+    if let Some(icon_path) = find_kbintake_icon() {
+        let wide: Vec<u16> = icon_path.encode_utf16().chain(std::iter::once(0)).collect();
+        let ptr = unsafe { CoTaskMemAlloc(wide.len() * 2) } as *mut u16;
+        if ptr.is_null() {
+            return E_OUTOFMEMORY;
+        }
+        std::ptr::copy_nonoverlapping(wide.as_ptr(), ptr, wide.len());
+        *ppsz_icon = ptr;
+        S_OK
+    } else {
+        *ppsz_icon = std::ptr::null_mut();
+        S_OK
+    }
 }
 
-unsafe extern "system" fn cmd_get_tooltip(_this: *mut c_void, _psi: *mut c_void, ppsz_tip: *mut *mut u16) -> HRESULT {
+unsafe extern "system" fn cmd_get_tooltip(
+    _this: *mut c_void,
+    _psi: *mut c_void,
+    ppsz_tip: *mut *mut u16,
+) -> HRESULT {
     if ppsz_tip.is_null() {
         return E_INVALIDARG;
     }
     const TIP: &[u16] = &[
-        b'I' as u16, b'm' as u16, b'p' as u16, b'o' as u16, b'r' as u16, b't' as u16,
-        b' ' as u16, b'f' as u16, b'i' as u16, b'l' as u16, b'e' as u16,
-        b'(' as u16, b's' as u16, b')' as u16, b' ' as u16,
-        b'i' as u16, b'n' as u16, b't' as u16, b'o' as u16,
-        b' ' as u16, b'K' as u16, b'B' as u16, b'I' as u16, b'n' as u16,
-        b't' as u16, b'a' as u16, b'k' as u16, b'e' as u16,
-        b' ' as u16, b'v' as u16, b'a' as u16, b'u' as u16, b'l' as u16, b't' as u16,
+        b'I' as u16,
+        b'm' as u16,
+        b'p' as u16,
+        b'o' as u16,
+        b'r' as u16,
+        b't' as u16,
+        b' ' as u16,
+        b'f' as u16,
+        b'i' as u16,
+        b'l' as u16,
+        b'e' as u16,
+        b'(' as u16,
+        b's' as u16,
+        b')' as u16,
+        b' ' as u16,
+        b'i' as u16,
+        b'n' as u16,
+        b't' as u16,
+        b'o' as u16,
+        b' ' as u16,
+        b'K' as u16,
+        b'B' as u16,
+        b'I' as u16,
+        b'n' as u16,
+        b't' as u16,
+        b'a' as u16,
+        b'k' as u16,
+        b'e' as u16,
+        b' ' as u16,
+        b'v' as u16,
+        b'a' as u16,
+        b'u' as u16,
+        b'l' as u16,
+        b't' as u16,
         0,
     ];
     let ptr = unsafe { CoTaskMemAlloc(TIP.len() * 2) } as *mut u16;
@@ -152,7 +229,12 @@ unsafe extern "system" fn cmd_get_canonical_name(_this: *mut c_void, pguid: *mut
     S_OK
 }
 
-unsafe extern "system" fn cmd_get_state(_this: *mut c_void, _psi: *mut c_void, _foktobeslow: i32, pstate: *mut u32) -> HRESULT {
+unsafe extern "system" fn cmd_get_state(
+    _this: *mut c_void,
+    _psi: *mut c_void,
+    _foktobeslow: i32,
+    pstate: *mut u32,
+) -> HRESULT {
     if pstate.is_null() {
         return E_INVALIDARG;
     }
@@ -168,11 +250,18 @@ unsafe extern "system" fn cmd_get_flags(_this: *mut c_void, pflags: *mut u32) ->
     S_OK
 }
 
-unsafe extern "system" fn cmd_enum_sub_commands(_this: *mut c_void, _ppenum: *mut *mut c_void) -> HRESULT {
+unsafe extern "system" fn cmd_enum_sub_commands(
+    _this: *mut c_void,
+    _ppenum: *mut *mut c_void,
+) -> HRESULT {
     E_NOTIMPL
 }
 
-unsafe extern "system" fn cmd_invoke(_this: *mut c_void, psi: *mut c_void, _pbc: *mut c_void) -> HRESULT {
+unsafe extern "system" fn cmd_invoke(
+    _this: *mut c_void,
+    psi: *mut c_void,
+    _pbc: *mut c_void,
+) -> HRESULT {
     let _ = _this; // unused
 
     if psi.is_null() {
@@ -242,6 +331,29 @@ fn spawn_kbintake_import(paths: &[String]) {
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     let _ = cmd.spawn();
+}
+
+/// Locate `kbintake.ico` next to the current module or the exe.
+fn find_kbintake_icon() -> Option<String> {
+    if let Ok(dll_path) = std::env::current_exe() {
+        if let Some(parent) = dll_path.parent() {
+            for name in ["kbintake.ico", "assets\\kbintake.ico"] {
+                let candidate = parent.join(name);
+                if candidate.exists() {
+                    return Some(candidate.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+        let candidate = format!(r"{}\Programs\kbintake\kbintake.ico", local_app_data);
+        if std::path::Path::new(&candidate).exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }
 
 /// Locate `kbintake.exe`.

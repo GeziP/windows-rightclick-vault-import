@@ -146,47 +146,44 @@ pub fn preview_import(
             let mut rendered_subfolder = None;
             let mut frontmatter_preview = None;
             let resolved_template = match &intent.template_name {
-                Some(name) => {
-                    Some(template::resolve_template(&app.config.templates, name)?)
-                }
+                Some(name) => Some(template::resolve_template(&app.config.templates, name)?),
                 None => app.config.template_for_path(&file, size).and_then(|tc| {
                     template::resolve_template(&app.config.templates, &tc.name).ok()
                 }),
             };
-            let destination =
-                if let Some(resolved) = resolved_template {
-                    let rendered = template::render_template(
-                        &resolved,
-                        &template::TemplateRenderContext {
-                            source_path: file.display().to_string(),
-                            source_name: source_name.clone(),
-                            file_ext: file
-                                .extension()
-                                .map(|value| value.to_string_lossy().to_string()),
-                            file_size_bytes: size,
-                            imported_at: chrono::Utc::now(),
-                            sha256: hash.clone(),
-                            target_name: target.name.clone(),
-                            batch_id: "dry-run".to_string(),
-                        },
-                    );
-                    let subfolder = rendered.subfolder.clone();
-                    let preview_root = match &subfolder {
-                        Some(subfolder) => target.root_path.join(subfolder),
-                        None => target
-                            .default_subfolder
-                            .as_deref()
-                            .filter(|subfolder| !subfolder.trim().is_empty())
-                            .map(|subfolder| target.root_path.join(subfolder))
-                            .unwrap_or_else(|| target.root_path.clone()),
-                    };
-                    template_name = Some(rendered.name.clone());
-                    rendered_subfolder = subfolder;
-                    frontmatter_preview = Some(rendered.frontmatter);
-                    LocalFolderAdapter::new(preview_root).preview_destination(&source_name)
-                } else {
-                    adapter.preview_destination(&source_name)
+            let destination = if let Some(resolved) = resolved_template {
+                let rendered = template::render_template(
+                    &resolved,
+                    &template::TemplateRenderContext {
+                        source_path: file.display().to_string(),
+                        source_name: source_name.clone(),
+                        file_ext: file
+                            .extension()
+                            .map(|value| value.to_string_lossy().to_string()),
+                        file_size_bytes: size,
+                        imported_at: chrono::Utc::now(),
+                        sha256: hash.clone(),
+                        target_name: target.name.clone(),
+                        batch_id: "dry-run".to_string(),
+                    },
+                );
+                let subfolder = rendered.subfolder.clone();
+                let preview_root = match &subfolder {
+                    Some(subfolder) => target.root_path.join(subfolder),
+                    None => target
+                        .default_subfolder
+                        .as_deref()
+                        .filter(|subfolder| !subfolder.trim().is_empty())
+                        .map(|subfolder| target.root_path.join(subfolder))
+                        .unwrap_or_else(|| target.root_path.clone()),
                 };
+                template_name = Some(rendered.name.clone());
+                rendered_subfolder = subfolder;
+                frontmatter_preview = Some(rendered.frontmatter);
+                LocalFolderAdapter::new(preview_root).preview_destination(&source_name)
+            } else {
+                adapter.preview_destination(&source_name)
+            };
             rows.push(row(
                 &file,
                 Some(target.name.clone()),

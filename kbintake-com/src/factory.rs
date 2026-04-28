@@ -19,10 +19,16 @@ const S_OK: HRESULT = HRESULT(0);
 
 #[repr(C)]
 struct ClassFactoryVtbl {
-    query_interface: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    query_interface:
+        unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
     add_ref: unsafe extern "system" fn(*mut c_void) -> u32,
     release: unsafe extern "system" fn(*mut c_void) -> u32,
-    create_instance: unsafe extern "system" fn(*mut c_void, *mut c_void, *const GUID, *mut *mut c_void) -> HRESULT,
+    create_instance: unsafe extern "system" fn(
+        *mut c_void,
+        *mut c_void,
+        *const GUID,
+        *mut *mut c_void,
+    ) -> HRESULT,
     lock_server: unsafe extern "system" fn(*mut c_void, i32) -> HRESULT,
 }
 
@@ -40,7 +46,11 @@ static CF_VTBL: ClassFactoryVtbl = ClassFactoryVtbl {
     lock_server: cf_lock_server,
 };
 
-unsafe extern "system" fn cf_query_interface(this: *mut c_void, riid: *const GUID, ppv: *mut *mut c_void) -> HRESULT {
+unsafe extern "system" fn cf_query_interface(
+    this: *mut c_void,
+    riid: *const GUID,
+    ppv: *mut *mut c_void,
+) -> HRESULT {
     if riid.is_null() || ppv.is_null() {
         return E_INVALIDARG;
     }
@@ -57,12 +67,17 @@ unsafe extern "system" fn cf_query_interface(this: *mut c_void, riid: *const GUI
 
 unsafe extern "system" fn cf_add_ref(this: *mut c_void) -> u32 {
     let cf = &mut *(this as *mut ClassFactory);
-    cf.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u32 + 1
+    cf.ref_count
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u32
+        + 1
 }
 
 unsafe extern "system" fn cf_release(this: *mut c_void) -> u32 {
     let cf = &mut *(this as *mut ClassFactory);
-    let new_count = cf.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) as u32 - 1;
+    let new_count = cf
+        .ref_count
+        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst) as u32
+        - 1;
     if new_count == 0 {
         drop(Box::from_raw(this as *mut ClassFactory));
     }

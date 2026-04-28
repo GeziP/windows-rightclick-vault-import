@@ -1,0 +1,192 @@
+name: COM DLL Validation
+
+on:
+  pull_request:
+    paths:
+      - 'kbintake-com/**'
+      - '.github/workflows/com-validation.yml'
+  push:
+    branches:
+      - main
+      - v2.0
+    paths:
+      - 'kbintake-com/**'
+      - '.github/workflows/com-validation.yml'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CLSID: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+
+jobs:
+  build-and-test:
+    name: COM DLL Build & Registry Validation
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kbintake-com -> target
+
+      - name: Lint kbintake-com
+        working-directory: kbintake-com
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Build kbintake-com DLL and reg tool
+        working-directory: kbintake-com
+        run: cargo build --locked --release
+
+      - name: Run unit tests
+        working-directory: kbintake-com
+        run: cargo test --locked
+
+      - name: Verify build artifacts exist
+        shell: pwsh
+        run: |
+          $dll = "kbintake-com/target/release/kbintake_com.dll"
+          $reg = "kbintake-com/target/release/kbintake-com-reg.exe"
+          if (-not (Test-Path $dll)) { Write-Error "DLL not found: $dll"; exit 1 }
+          if (-not (Test-Path $reg)) { Write-Error "Reg tool not found: $reg"; exit 1 }
+          Write-Host "DLL: $dll"
+          Write-Host "Reg: $reg"
+
+      - name: Check initial status (should be unregistered)
+        shell: pwsh
+        run: |
+          $output = & kbintake-com/target/release/kbintake-com-reg.exe status
+          Write-Host $output
+          if ($output -match "not registered") {
+            Write-Host "PASS: Initial state is unregistered"
+          } else {
+            # May be leftover from a previous run — clean up first
+            Write-Host "WARN: Unexpected initial state, cleaning up"
+            & kbintake-com/target/release/kbintake-com-reg.exe uninstall
+          }
+
+      - name: Register COM DLL
+        shell: pwsh
+        run: |
+          & kbintake-com/target/release/kbintake-com-reg.exe install --dll (Resolve-Path "kbintake-com/target/release/kbintake_com.dll")
+
+      - name: Verify registration (CLSID key exists)
+        shell: pwsh
+        run: |
+          $clsidKey = "HKCR:\CLSID\{$env:CLSID}"
+          if (-not (Test-Path $clsidKey)) {
+            Write-Error "CLSID key not found: $clsidKey"
+            exit 1
+          }
+          Write-Host "PASS: CLSID key exists"
+
+          $inprocKey = "$clsidKey\InprocServer32"
+          if (-not (Test-Path $inprocKey)) {
+            Write-Error "InprocServer32 key not found: $inprocKey"
+            exit 1
+          }
+          $dllValue = (Get-ItemProperty $inprocKey).'(default)'
+          Write-Host "DLL path in registry: $dllValue"
+          if ($dllValue -notmatch "kbintake_com\.dll") {
+            Write-Error "DLL path does not reference kbintake_com.dll"
+            exit 1
+          }
+          Write-Host "PASS: InprocServer32 configured"
+
+          $threading = (Get-ItemProperty $inprocKey).ThreadingModel
+          if ($threading -ne "Apartment") {
+            Write-Error "ThreadingModel should be 'Apartment', got '$threading'"
+            exit 1
+          }
+          Write-Host "PASS: ThreadingModel = Apartment"
+
+      - name: Verify registration (Explorer verb for Win11 top-level menu)
+        shell: pwsh
+        run: |
+          $verbKey = "HKCR:\*\shell\KBIntake"
+          if (-not (Test-Path $verbKey)) {
+            Write-Error "Explorer verb key not found: $verbKey"
+            exit 1
+          }
+          $label = (Get-ItemProperty $verbKey).'(default)'
+          Write-Host "Verb label: $label"
+          if ($label -ne "Add to Knowledge Base") {
+            Write-Error "Verb label mismatch: expected 'Add to Knowledge Base', got '$label'"
+            exit 1
+          }
+          $handler = (Get-ItemProperty $verbKey).ExplorerCommandHandler
+          Write-Host "ExplorerCommandHandler: $handler"
+          if ($handler -ne $env:CLSID) {
+            Write-Error "ExplorerCommandHandler mismatch: expected $($env:CLSID), got $handler"
+            exit 1
+          }
+          Write-Host "PASS: Explorer verb registered with ExplorerCommandHandler"
+
+          $cmdKey = "$verbKey\command"
+          if (-not (Test-Path $cmdKey)) {
+            Write-Error "Verb command key not found: $cmdKey"
+            exit 1
+          }
+          $cmdValue = (Get-ItemProperty $cmdKey).'(default)'
+          Write-Host "Command: $cmdValue"
+          if ($cmdValue -notmatch "kbintake.*import") {
+            Write-Error "Command does not reference kbintake import"
+            exit 1
+          }
+          Write-Host "PASS: Verb command configured"
+
+      - name: Verify status command (should show registered)
+        shell: pwsh
+        run: |
+          $output = & kbintake-com/target/release/kbintake-com-reg.exe status
+          Write-Host $output
+          if ($output -match "registered" -and $output -notmatch "not registered") {
+            Write-Host "PASS: Status shows registered"
+          } else {
+            Write-Error "Status should show registered"
+            exit 1
+          }
+
+      - name: Unregister COM DLL
+        shell: pwsh
+        run: |
+          & kbintake-com/target/release/kbintake-com-reg.exe uninstall
+
+      - name: Verify cleanup (CLSID key removed)
+        shell: pwsh
+        run: |
+          $clsidKey = "HKCR:\CLSID\{$env:CLSID}"
+          if (Test-Path $clsidKey) {
+            Write-Error "CLSID key still exists after uninstall: $clsidKey"
+            exit 1
+          }
+          Write-Host "PASS: CLSID key removed"
+
+      - name: Verify cleanup (Explorer verb removed)
+        shell: pwsh
+        run: |
+          $verbKey = "HKCR:\*\shell\KBIntake"
+          if (Test-Path $verbKey) {
+            Write-Error "Explorer verb key still exists after uninstall"
+            exit 1
+          }
+          Write-Host "PASS: Explorer verb key removed"
+
+      - name: Verify status command (should show unregistered)
+        shell: pwsh
+        run: |
+          $output = & kbintake-com/target/release/kbintake-com-reg.exe status
+          Write-Host $output
+          if ($output -match "not registered") {
+            Write-Host "PASS: Status shows not registered after uninstall"
+          } else {
+            Write-Error "Status should show not registered after uninstall"
+            exit 1
+          }

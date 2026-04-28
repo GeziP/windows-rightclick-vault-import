@@ -658,7 +658,8 @@ fn import_process_failure_before_enqueue_does_not_drain_existing_queue() {
     fs::write(&existing, "still queued").unwrap();
     handle_import(&app, None, None, vec![existing]).unwrap();
 
-    let err = handle_import_command(&app, None, None, true, false, false, false, vec![missing]).unwrap_err();
+    let err = handle_import_command(&app, None, None, true, false, false, false, vec![missing])
+        .unwrap_err();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);

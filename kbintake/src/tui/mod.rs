@@ -117,9 +117,7 @@ fn run_loop(
             }
 
             // Handle text input mode first.
-            if ui.input_mode != InputMode::Normal
-                && handle_text_input(ui, key.code)
-            {
+            if ui.input_mode != InputMode::Normal && handle_text_input(ui, key.code) {
                 continue;
             }
 
@@ -184,20 +182,15 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     let path = PathBuf::from(&input);
                     let name = ui.pending_target_name.take().unwrap_or_default();
                     match crate::config::validate_target_root(&path) {
-                        Ok(()) => {
-                            match ui.config.add_target(name, path) {
-                                Ok(t) => {
-                                    let lang = ui.config.language().to_string();
-                                    ui.message = format!(
-                                        "{} {}",
-                                        tr("cli.added_target", &lang),
-                                        t.name
-                                    );
-                                    ui.pending_save = true;
-                                }
-                                Err(e) => ui.message = format!("ERROR: {e:#}"),
+                        Ok(()) => match ui.config.add_target(name, path) {
+                            Ok(t) => {
+                                let lang = ui.config.language().to_string();
+                                ui.message =
+                                    format!("{} {}", tr("cli.added_target", &lang), t.name);
+                                ui.pending_save = true;
                             }
-                        }
+                            Err(e) => ui.message = format!("ERROR: {e:#}"),
+                        },
                         Err(e) => ui.message = format!("Invalid path: {e:#}"),
                     }
                     ui.input_mode = InputMode::Normal;
@@ -273,7 +266,11 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                             .split(',')
                             .map(|e| {
                                 let e = e.trim().to_string();
-                                if e.starts_with('.') { e } else { format!(".{e}") }
+                                if e.starts_with('.') {
+                                    e
+                                } else {
+                                    format!(".{e}")
+                                }
                             })
                             .collect();
                         ui.config.watch[idx].extensions = Some(StringList::Many(exts));
@@ -340,10 +337,7 @@ fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         .split(size);
 
     // Tabs
-    let titles: Vec<Span> = TAB_TITLES
-        .iter()
-        .map(|t| Span::raw(*t))
-        .collect();
+    let titles: Vec<Span> = TAB_TITLES.iter().map(|t| Span::raw(*t)).collect();
     let active_index = ui.active_tab as usize;
     let tabs = Tabs::new(titles)
         .block(Block::default().borders(Borders::ALL).title("Tabs [1-4]"))
@@ -366,11 +360,8 @@ fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
     } else {
         format!("\u{26a0} {}", ui.message)
     };
-    let footer = Paragraph::new(Span::raw(&footer_text)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Help "),
-    );
+    let footer = Paragraph::new(Span::raw(&footer_text))
+        .block(Block::default().borders(Borders::ALL).title(" Help "));
     frame.render_widget(footer, chunks[2]);
 }
 
@@ -532,16 +523,35 @@ fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::lay
     let lang = ui.config.language();
     let lines = vec![
         Line::from(vec![
-            Span::styled(tr("tui.max_file_size", lang), Style::default().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                tr("tui.max_file_size", lang),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
             Span::raw(format!(" {} MB", ui.config.import.max_file_size_mb)),
         ]),
         Line::from(vec![
-            Span::styled(tr("tui.frontmatter", lang), Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(format!(" {}", if ui.config.import.inject_frontmatter { "ON" } else { "OFF" })),
+            Span::styled(
+                tr("tui.frontmatter", lang),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                " {}",
+                if ui.config.import.inject_frontmatter {
+                    "ON"
+                } else {
+                    "OFF"
+                }
+            )),
         ]),
         Line::from(vec![
-            Span::styled(tr("tui.language", lang), Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(format!(" {}", ui.config.import.language.as_deref().unwrap_or("en"))),
+            Span::styled(
+                tr("tui.language", lang),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                " {}",
+                ui.config.import.language.as_deref().unwrap_or("en")
+            )),
         ]),
         Line::from(Span::default()),
         Line::from(vec![
@@ -706,11 +716,7 @@ fn handle_remove(ui: &mut SettingsUi) {
             let removed = ui.config.targets.pop().unwrap();
             let name = removed.name;
             let lang = ui.config.language().to_string();
-            ui.message = format!(
-                "{} {}",
-                tr("tui.removed", &lang),
-                name
-            );
+            ui.message = format!("{} {}", tr("tui.removed", &lang), name);
             ui.pending_save = true;
         } else {
             ui.message = tr("tui.cannot_remove_last", ui.config.language());

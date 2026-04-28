@@ -195,9 +195,14 @@ Implemented on branch `v2.0`:
   - HKCR registration/unregistration binary
   - `Invoke` spawns `kbintake.exe import --process` in background
 
+Automated validation:
+
+- `.github/workflows/com-validation.yml` — GHA workflow: build DLL, reg install, verify HKCR keys, reg uninstall, verify cleanup
+- runs on push/PR touching `kbintake-com/` and on manual dispatch
+
 Still required by Phase 1 tracker:
 
-- real install/uninstall validation on a Windows 11 machine
+- real Windows 11 Explorer UI test on a physical machine (right-click visibility, "Show more options", toast, end-to-end import)
 - go/no-go decision for v2.0 vs v2.1
 
 ## Working Rule For Future v2 Slices
@@ -213,9 +218,8 @@ Before coding:
 
 Most justified next step from the current state:
 
-- Real Windows 11 validation of the `kbintake-com` DLL on a physical machine (`#57`)
+- Real Windows 11 validation of the `kbintake-com` DLL on a physical machine (`#57`) — GHA validates registry keys, but Explorer UI needs manual test
 
 After that:
 
-- Watch Mode (`#62`) — file system watcher that reuses the routing/template engine
-- TUI settings flow (`#60`) — GUI for editing config.toml
+- Phase 2 features per `#55` tracker

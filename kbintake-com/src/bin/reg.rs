@@ -72,16 +72,26 @@ fn cmd_install(dll: Option<PathBuf>) {
     let _ = inproc.set_value("", &dll_str);
     let _ = inproc.set_value("ThreadingModel", &"Apartment");
 
-    // Register ShellEx handler.
-    let shell_ex_key = r"Software\Classes\*\ShellEx\ContextMenuHandlers\KBIntakeCOM";
-    let (handler, _) = match hkcr.create_subkey(shell_ex_key) {
+    // Register as a top-level verb for Win11 native context menu.
+    let verb_key = r"*\shell\KBIntake";
+    let (verb, _) = match hkcr.create_subkey(verb_key) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("ERROR: failed to create ShellEx handler key: {:#}", e);
+            eprintln!("ERROR: failed to create shell verb key: {:#}", e);
             std::process::exit(1);
         }
     };
-    let _ = handler.set_value("", &CLSID_STR);
+    let _ = verb.set_value("", &"Add to Knowledge Base");
+    let _ = verb.set_value("ExplorerCommandHandler", &CLSID_STR);
+
+    let (verb_cmd, _) = match hkcr.create_subkey(format!(r"{}\command", verb_key)) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("ERROR: failed to create verb command key: {:#}", e);
+            std::process::exit(1);
+        }
+    };
+    let _ = verb_cmd.set_value("", &format!("\"{}\" import --process \"%1\"", dll_str));
 
     println!("COM DLL registered: {}", dll_path.display());
 }
@@ -99,10 +109,10 @@ fn cmd_uninstall() {
 
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
     let clsid_key = format!(r"CLSID\{{{}}}", CLSID_STR);
-    let shell_ex_key = r"Software\Classes\*\ShellEx\ContextMenuHandlers\KBIntakeCOM";
+    let verb_key = r"*\shell\KBIntake";
 
     let _ = hkcr.delete_subkey_all(&clsid_key);
-    let _ = hkcr.delete_subkey_all(shell_ex_key);
+    let _ = hkcr.delete_subkey_all(verb_key);
 
     println!("COM registration removed");
 }
@@ -120,7 +130,7 @@ fn cmd_status() {
 
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
     let clsid_key = format!(r"CLSID\{{{}}}", CLSID_STR);
-    let shell_ex_key = r"Software\Classes\*\ShellEx\ContextMenuHandlers\KBIntakeCOM";
+    let verb_key = r"*\shell\KBIntake";
 
     if let Ok(clsid_handle) = hkcr.open_subkey(&clsid_key) {
         println!("COM registration: registered");
@@ -133,12 +143,15 @@ fn cmd_status() {
         println!("COM registration: not registered");
     }
 
-    if let Ok(handler) = hkcr.open_subkey(shell_ex_key) {
-        if let Ok(guid) = handler.get_value::<String, _>("") {
-            println!("Explorer handler: {}", guid);
+    if let Ok(verb) = hkcr.open_subkey(verb_key) {
+        if let Ok(label) = verb.get_value::<String, _>("") {
+            println!("Explorer verb: {}", label);
+        }
+        if let Ok(handler) = verb.get_value::<String, _>("ExplorerCommandHandler") {
+            println!("ExplorerCommandHandler: {}", handler);
         }
     } else {
-        println!("Explorer handler: not registered");
+        println!("Explorer verb: not registered");
     }
 }
 

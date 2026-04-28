@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -49,10 +49,12 @@ impl DebounceTracker {
 
     fn record_event(&mut self, path: PathBuf) {
         let now = Instant::now();
-        self.files.entry(path.clone()).or_insert_with(|| FileDebounceState {
-            last_event: now,
-            path: path.clone(),
-        });
+        self.files
+            .entry(path.clone())
+            .or_insert_with(|| FileDebounceState {
+                last_event: now,
+                path: path.clone(),
+            });
         self.files.get_mut(&path).unwrap().last_event = now;
     }
 
@@ -165,9 +167,7 @@ pub fn run_watcher(
                 let config = watch_configs
                     .iter()
                     .find(|c| file_path.starts_with(&c.path))
-                    .unwrap_or_else(|| {
-                        watch_configs.first().expect("non-empty watch_configs")
-                    });
+                    .unwrap_or_else(|| watch_configs.first().expect("non-empty watch_configs"));
 
                 match process_stable_file(app, config, &file_path) {
                     Ok(true) => {
@@ -202,10 +202,7 @@ pub fn run_watcher(
     Ok(())
 }
 
-fn handle_event(
-    debounce_map: &mut HashMap<PathBuf, DebounceTracker>,
-    event: &Event,
-) {
+fn handle_event(debounce_map: &mut HashMap<PathBuf, DebounceTracker>, event: &Event) {
     // Only care about file creation and modification events.
     use notify::EventKind;
     match event.kind {
@@ -225,11 +222,7 @@ fn handle_event(
     }
 }
 
-fn process_stable_file(
-    app: &App,
-    config: &WatchConfig,
-    file_path: &Path,
-) -> Result<bool> {
+fn process_stable_file(app: &App, config: &WatchConfig, file_path: &Path) -> Result<bool> {
     // Extension filter check.
     if let Some(extensions) = &config.extensions {
         if let Some(ext) = file_path.extension().and_then(|e| e.to_str()) {
@@ -246,7 +239,10 @@ fn process_stable_file(
     let metadata = match retry_locked(file_path, || Ok(std::fs::metadata(file_path)?)) {
         Ok(m) => m,
         Err(_) => {
-            warn!("file still locked after retries, skipping: {}", file_path.display());
+            warn!(
+                "file still locked after retries, skipping: {}",
+                file_path.display()
+            );
             return Ok(false);
         }
     };
@@ -280,7 +276,11 @@ fn process_stable_file(
     ))?;
 
     // Create item.
-    let item = ItemJob::new(batch.batch_id.clone(), intent.target.target_id, file_path.to_path_buf());
+    let item = ItemJob::new(
+        batch.batch_id.clone(),
+        intent.target.target_id,
+        file_path.to_path_buf(),
+    );
     repo.insert_item(&item)?;
     repo.insert_event(&crate::domain::DomainEvent::new(
         "item",
@@ -355,13 +355,11 @@ where
             }
         }
     }
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("file locked after {} retries", MAX_LOCK_RETRIES)))
+    Err(last_err
+        .unwrap_or_else(|| anyhow::anyhow!("file locked after {} retries", MAX_LOCK_RETRIES)))
 }
 
-fn resolve_watch_configs(
-    app: &App,
-    cli_paths: Option<Vec<PathBuf>>,
-) -> Result<Vec<WatchConfig>> {
+fn resolve_watch_configs(app: &App, cli_paths: Option<Vec<PathBuf>>) -> Result<Vec<WatchConfig>> {
     if let Some(paths) = cli_paths {
         return paths
             .into_iter()

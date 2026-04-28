@@ -48,7 +48,11 @@ fn main() -> ExitCode {
             open,
             paths,
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_import_command(&app, target, template, process, dry_run, json, open, paths))
+            .and_then(|app| {
+                cli::handle_import_command(
+                    &app, target, template, process, dry_run, json, open, paths,
+                )
+            })
             .map_err(|err| (CommandKind::Import, err)),
         Commands::Jobs { command } => {
             let kind = CommandKind::Jobs(command_kind(&command));

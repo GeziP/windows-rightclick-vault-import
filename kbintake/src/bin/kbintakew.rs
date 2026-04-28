@@ -52,7 +52,11 @@ fn main() -> ExitCode {
             open,
             paths,
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_import_command(&app, target, template, process, dry_run, json, open, paths))
+            .and_then(|app| {
+                cli::handle_import_command(
+                    &app, target, template, process, dry_run, json, open, paths,
+                )
+            })
             .map_err(|err| (CommandKind::Import, err)),
         Commands::Jobs { command } => {
             let kind = CommandKind::Jobs(command_kind(&command));
@@ -76,7 +80,12 @@ fn main() -> ExitCode {
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Vault, err)),
         Commands::Explorer {
-            command: ExplorerCommands::RunImport { queue_only, template, paths },
+            command:
+                ExplorerCommands::RunImport {
+                    queue_only,
+                    template,
+                    paths,
+                },
         } => app::App::bootstrap_at(app_data_dir)
             .and_then(|app| cli::handle_explorer_run_import(&app, queue_only, template, paths))
             .map_err(|err| {
@@ -100,11 +109,9 @@ fn main() -> ExitCode {
             .and_then(|app| kbintake::tui::run_settings_tui(app.config))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
-        Commands::Obsidian { command } => {
-            cli::handle_obsidian(command)
-                .map(|()| exit_codes::SUCCESS)
-                .map_err(|err| (CommandKind::Config, err))
-        }
+        Commands::Obsidian { command } => cli::handle_obsidian(command)
+            .map(|()| exit_codes::SUCCESS)
+            .map_err(|err| (CommandKind::Config, err)),
         Commands::Version => {
             println!("kbintake {}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::SUCCESS)

@@ -370,8 +370,14 @@ pub fn handle_import(
     }
 
     info!(batch_id = %batch.batch_id, items = count, "batch queued");
-    println!("{}", tr("cli.queued_batch", lang).replace("{}", &batch.batch_id));
-    println!("{}", tr("cli.items_queued", lang).replace("{}", &count.to_string()));
+    println!(
+        "{}",
+        tr("cli.queued_batch", lang).replace("{}", &batch.batch_id)
+    );
+    println!(
+        "{}",
+        tr("cli.items_queued", lang).replace("{}", &count.to_string())
+    );
     let target_name = if batch_target_id == "mixed" {
         "mixed".to_string()
     } else {
@@ -379,7 +385,10 @@ pub fn handle_import(
     };
     println!("{}", tr("cli.target", lang).replace("{}", &target_name));
     match &routing_summary {
-        RoutingSummary::Single(rule) => println!("{}", tr("cli.routing_rule_single", lang).replace("{}", rule)),
+        RoutingSummary::Single(rule) => println!(
+            "{}",
+            tr("cli.routing_rule_single", lang).replace("{}", rule)
+        ),
         RoutingSummary::Multiple => println!("{}", tr("cli.routing_rule_multiple", lang)),
         RoutingSummary::None => {}
     }
@@ -491,7 +500,10 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             println!("{}", tr("cli.status", lang).replace("{}", &batch.status));
             println!("{}", tr("cli.source", lang).replace("{}", &batch.source));
             println!("{}", tr("cli.target", lang).replace("{}", &batch.target_id));
-            println!("{}", tr("cli.items", lang).replace("{}", &items.len().to_string()));
+            println!(
+                "{}",
+                tr("cli.items", lang).replace("{}", &items.len().to_string())
+            );
             println!("{}", format_job_show_header());
             for item in items {
                 println!("{}", format_job_show_row(&item));
@@ -520,7 +532,10 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
                     }),
                 ))?;
             }
-            println!("{}", tr("cli.retried_items", lang).replace("{retried}", &retried.to_string()));
+            println!(
+                "{}",
+                tr("cli.retried_items", lang).replace("{retried}", &retried.to_string())
+            );
             Ok(exit_codes::SUCCESS)
         }
         JobCommands::Undo { batch_id, force } => {
@@ -528,7 +543,10 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             if batch.status == crate::queue::state_machine::STATUS_UNDONE
                 || batch.status == crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
             {
-                println!("{}", tr("cli.batch_already_undone", lang).replace("{}", &batch.batch_id));
+                println!(
+                    "{}",
+                    tr("cli.batch_already_undone", lang).replace("{}", &batch.batch_id)
+                );
                 return Ok(exit_codes::SUCCESS);
             }
             if batch.status == crate::queue::state_machine::STATUS_QUEUED
@@ -786,14 +804,23 @@ fn parse_batch_status_filter(status: Option<String>, lang: &str) -> Result<Optio
         return Ok(Some(status));
     }
 
-    anyhow::bail!("{}", tr("cli.unsupported_status", lang).replace("{status}", &status));
+    anyhow::bail!(
+        "{}",
+        tr("cli.unsupported_status", lang).replace("{status}", &status)
+    );
 }
 
 pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
     let lang = app.config.language();
     let mut failed = false;
-    println!("{}", tr("cli.config_dir", lang).replace("{}", &app.config.app_data_dir.display().to_string()));
-    println!("{}", tr("cli.database", lang).replace("{}", &app.db_path.display().to_string()));
+    println!(
+        "{}",
+        tr("cli.config_dir", lang).replace("{}", &app.config.app_data_dir.display().to_string())
+    );
+    println!(
+        "{}",
+        tr("cli.database", lang).replace("{}", &app.db_path.display().to_string())
+    );
 
     let config_path = app.config.config_path();
     if config_path.exists() {
@@ -848,13 +875,11 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
         Ok(target) => {
             println!(
                 "{}",
-                tr("cli.default_target", lang)
-                    .replace("{}", &target.name)
+                tr("cli.default_target", lang).replace("{}", &target.name)
             );
             println!(
                 "{}",
-                tr("cli.target_path", lang)
-                    .replace("{}", &target.root_path.display().to_string())
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
             );
             match check_target_root(&target.root_path, fix) {
                 Ok(()) => print_doctor_ok(
@@ -1018,8 +1043,14 @@ pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
             let target = config.set_default_target(name, path)?;
             config::validate_target_root(&target.root_path)?;
             config.save()?;
-            println!("{}", tr("cli.default_target", lang).replace("{}", &target.name));
-            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
+            println!(
+                "{}",
+                tr("cli.default_target", lang).replace("{}", &target.name)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
     }
@@ -1065,10 +1096,19 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
         }
         TargetCommands::Show { target } => {
             let target = app.config.target_any_by_id(&target)?;
-            println!("{}", tr("cli.item_target", lang).replace("{}", &target.target_id));
+            println!(
+                "{}",
+                tr("cli.item_target", lang).replace("{}", &target.target_id)
+            );
             println!("{}", tr("cli.item_name", lang).replace("{}", &target.name));
-            println!("{}", tr("cli.item_status", lang).replace("{}", &target.status));
-            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
+            println!(
+                "{}",
+                tr("cli.item_status", lang).replace("{}", &target.status)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
         TargetCommands::Add { name, path } => {
@@ -1076,16 +1116,28 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             let target = config.add_target(name, path)?;
             config::validate_target_root(&target.root_path)?;
             config.save()?;
-            println!("{}", tr("cli.added_target", lang).replace("{}", &target.target_id));
-            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
+            println!(
+                "{}",
+                tr("cli.added_target", lang).replace("{}", &target.target_id)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
         TargetCommands::Rename { target, new_name } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.rename_target(&target, new_name)?;
             config.save()?;
-            println!("{}", tr("cli.renamed_target", lang).replace("{}", &target.target_id));
-            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
+            println!(
+                "{}",
+                tr("cli.renamed_target", lang).replace("{}", &target.target_id)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
         TargetCommands::Remove { target, force } => {
@@ -1109,15 +1161,24 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             }
             let removed = config.remove_target(&target)?;
             config.save()?;
-            println!("{}", tr("cli.archived_target", lang).replace("{}", &removed.target_id));
+            println!(
+                "{}",
+                tr("cli.archived_target", lang).replace("{}", &removed.target_id)
+            );
             Ok(())
         }
         TargetCommands::SetDefault { target } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.set_default_target_by_id(&target)?;
             config.save()?;
-            println!("{}", tr("cli.default_target", lang).replace("{}", &target.target_id));
-            println!("{}", tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string()));
+            println!(
+                "{}",
+                tr("cli.default_target", lang).replace("{}", &target.target_id)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
     }
@@ -1163,9 +1224,15 @@ fn open_successful_notes_in_obsidian(app: &App, batch_id: &str) -> Result<()> {
         if item.status != crate::queue::state_machine::STATUS_SUCCESS {
             continue;
         }
-        let Some(stored_path) = &item.stored_path else { continue };
-        let Ok(target) = app.config.target_by_id(&item.target_id) else { continue };
-        let Some(ref vault) = target.obsidian_vault else { continue };
+        let Some(stored_path) = &item.stored_path else {
+            continue;
+        };
+        let Ok(target) = app.config.target_by_id(&item.target_id) else {
+            continue;
+        };
+        let Some(ref vault) = target.obsidian_vault else {
+            continue;
+        };
         if !frontmatter::is_markdown_extension(item.file_ext.as_deref()) {
             continue;
         }
@@ -1229,7 +1296,12 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
     }
 }
 
-pub fn handle_explorer_run_import(app: &App, queue_only: bool, template: Option<String>, paths: Vec<PathBuf>) -> Result<i32> {
+pub fn handle_explorer_run_import(
+    app: &App,
+    queue_only: bool,
+    template: Option<String>,
+    paths: Vec<PathBuf>,
+) -> Result<i32> {
     let lang = app.config.language();
     let outcome = handle_import(app, None, template, paths)?;
     if queue_only {
@@ -1307,11 +1379,9 @@ fn queued_toast_line(outcome: &ImportOutcome, lang: &str) -> String {
         RoutingSummary::Multiple => tr("toast.queued_multiple", lang)
             .replace("{count}", &outcome.item_count.to_string())
             .replace("{target}", &outcome.target_name),
-        RoutingSummary::None => {
-            tr("toast.queued_none", lang)
-                .replace("{count}", &outcome.item_count.to_string())
-                .replace("{target}", &outcome.target_name)
-        }
+        RoutingSummary::None => tr("toast.queued_none", lang)
+            .replace("{count}", &outcome.item_count.to_string())
+            .replace("{target}", &outcome.target_name),
     }
 }
 
@@ -1442,15 +1512,32 @@ fn handle_vault_stats(app: &App, target_filter: Option<String>, json: bool) -> R
 
     for row in rows {
         let default_marker = if row.is_default { " (default)" } else { "" };
-        println!("{}", tr("cli.vault_target", lang).replace("{0}", &row.name).replace("{1}", default_marker));
-        println!("{}", tr("cli.vault_path", lang).replace("{}", &row.root_path));
-        println!("{}", tr("cli.vault_files", lang).replace("{}", &row.files_imported.to_string()));
-        println!("{}", tr("cli.vault_storage", lang).replace("{}", &format_bytes(row.storage_bytes)));
+        println!(
+            "{}",
+            tr("cli.vault_target", lang)
+                .replace("{0}", &row.name)
+                .replace("{1}", default_marker)
+        );
+        println!(
+            "{}",
+            tr("cli.vault_path", lang).replace("{}", &row.root_path)
+        );
+        println!(
+            "{}",
+            tr("cli.vault_files", lang).replace("{}", &row.files_imported.to_string())
+        );
+        println!(
+            "{}",
+            tr("cli.vault_storage", lang).replace("{}", &format_bytes(row.storage_bytes))
+        );
         println!(
             "  Duplicates:    {:.0}%  ({} skipped)",
             row.duplicate_percent, row.duplicate_count
         );
-        println!("{}", tr("cli.vault_failed", lang).replace("{}", &row.failed_count.to_string()));
+        println!(
+            "{}",
+            tr("cli.vault_failed", lang).replace("{}", &row.failed_count.to_string())
+        );
         println!(
             "  Last import:   {}",
             row.last_import_at
@@ -1490,8 +1577,7 @@ fn format_timestamp(value: &str) -> String {
 pub fn handle_watch(app: &App, paths: Option<Vec<PathBuf>>) -> Result<i32> {
     // CLI watch mode runs until Ctrl-C; never shuts down via flag.
     let shutdown_flag = Arc::new(AtomicBool::new(false));
-    crate::agent::watcher::run_watcher(app, paths, shutdown_flag)
-        .map(|()| exit_codes::SUCCESS)
+    crate::agent::watcher::run_watcher(app, paths, shutdown_flag).map(|()| exit_codes::SUCCESS)
 }
 
 pub fn handle_obsidian(command: ObsidianCommands) -> Result<()> {
@@ -1979,8 +2065,17 @@ mod tests {
         fs::write(&empty, "").unwrap();
         fs::write(&large, "too large").unwrap();
 
-        let code =
-            handle_import_command(&app, None, None, true, false, false, false, vec![empty, large]).unwrap();
+        let code = handle_import_command(
+            &app,
+            None,
+            None,
+            true,
+            false,
+            false,
+            false,
+            vec![empty, large],
+        )
+        .unwrap();
 
         assert_eq!(code, exit_codes::PARTIAL_SUCCESS);
     }
@@ -1993,7 +2088,8 @@ mod tests {
         let large = temp.path().join("large.md");
         fs::write(&large, "too large").unwrap();
 
-        let code = handle_import_command(&app, None, None, true, false, false, false, vec![large]).unwrap();
+        let code = handle_import_command(&app, None, None, true, false, false, false, vec![large])
+            .unwrap();
 
         assert_eq!(code, exit_codes::FILE_SIZE_EXCEEDED);
     }
