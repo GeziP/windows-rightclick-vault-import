@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-pub const FILE_MENU_KEY: &str = r"Software\Classes\*\shell\KBIntake";
-pub const DIR_MENU_KEY: &str = r"Software\Classes\Directory\shell\KBIntake";
+pub const FILE_MENU_KEY: &str = r"Software\Classes\*\shell\KBIntake2";
+pub const DIR_MENU_KEY: &str = r"Software\Classes\Directory\shell\KBIntake2";
 
 #[derive(Debug, Clone)]
 pub struct InstallOptions {
@@ -62,6 +62,8 @@ pub fn build_cascading_registrations(options: &InstallOptions) -> Vec<CascadingM
 
 fn build_sub_items(exe_path: &Path, lang: &str) -> Vec<SubMenuItem> {
     let escaped = escape_command_path(exe_path);
+    let console_exe = exe_path.with_file_name("kbintake.exe");
+    let escaped_console = escape_command_path(&console_exe);
     vec![
         SubMenuItem {
             sub_key: "01import",
@@ -76,7 +78,7 @@ fn build_sub_items(exe_path: &Path, lang: &str) -> Vec<SubMenuItem> {
         SubMenuItem {
             sub_key: "03settings",
             label: crate::i18n::tr("explorer.sub_settings", lang),
-            command: format!(r#""{escaped}" explorer settings"#),
+            command: format!(r#"cmd.exe /c start "" "{escaped_console}" tui"#),
         },
     ]
 }
@@ -154,8 +156,8 @@ pub fn install(options: &InstallOptions) -> Result<Vec<CascadingMenu>> {
                 .create_subkey(&sub_key_path)
                 .with_context(|| format!("failed to create HKCU\\{}", sub_key_path))?;
             sub_key
-                .set_value("MUIVerb", &sub.label)
-                .with_context(|| format!("failed to set MUIVerb for HKCU\\{}", sub_key_path))?;
+                .set_value("", &sub.label)
+                .with_context(|| format!("failed to set label for HKCU\\{}", sub_key_path))?;
 
             let cmd_key_path = format!("{}\\command", sub_key_path);
             let (cmd_key, _) = hkcu
@@ -270,7 +272,9 @@ mod tests {
         assert!(file_menu.sub_items[1]
             .command
             .contains("run-import --queue-only \"%1\""));
-        assert!(file_menu.sub_items[2].command.contains("explorer settings"));
+        assert!(file_menu.sub_items[2]
+            .command
+            .contains("kbintake.exe\" tui"));
     }
 
     #[test]
