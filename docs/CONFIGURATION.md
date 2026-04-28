@@ -121,7 +121,9 @@ Set to `false` if you want Markdown copied without modification.
 - Default: `"en"`
 - Options: `"en"`, `"zh-CN"`
 
-Sets the language for CLI output, toast notifications, and TUI labels.
+Sets the language for CLI output, toast notifications, TUI labels, and Explorer right-click menu text.
+
+When you change this value, run `kbintake explorer install` to update the registry menu text to match the new language.
 
 ### `auto_open_obsidian`
 
@@ -371,6 +373,12 @@ inject_frontmatter = false
 ```toml
 [import]
 language = "zh-CN"
+```
+
+Then update the Explorer menu text:
+
+```powershell
+kbintake explorer install
 ```
 
 ### Auto-open notes in Obsidian

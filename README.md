@@ -98,7 +98,7 @@ kbintake jobs list
 - Watch Mode: monitor directories for new files with debounce and extension filters
 - TUI interactive settings (`kbintake tui`)
 - Obsidian URI integration with auto-open after import
-- zh-CN (Chinese) localization
+- zh-CN (Chinese) localization (CLI, toast, TUI, Explorer context menu)
 - Windows Service mode for background queue processing
 - release workflow that publishes installer and binary assets
 - winget manifest copy stored under `installer/winget/`
@@ -157,7 +157,7 @@ Important config sections:
 - `[[watch]]`: directories to monitor for automatic import
 - `[import].max_file_size_mb`: file size guardrail
 - `[import].inject_frontmatter`: Markdown metadata injection
-- `[import].language`: output language (`"en"` or `"zh-CN"`)
+- `[import].language`: output language (`"en"` or `"zh-CN"`), also controls Explorer context menu text
 - `[import].auto_open_obsidian`: auto-open imported notes in Obsidian
 - `[agent].poll_interval_secs`: background worker polling interval
 

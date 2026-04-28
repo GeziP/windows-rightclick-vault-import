@@ -124,7 +124,7 @@ kbintake jobs list
 - Watch Mode：监控目录自动导入新文件
 - TUI 交互式设置界面（`kbintake tui`）
 - Obsidian URI 集成（导入后自动打开笔记）
-- 简体中文本地化（zh-CN）
+- 简体中文本地化（zh-CN），包括 CLI 输出、toast 通知、TUI 界面和 Explorer 右键菜单文字
 - Windows Service 后台处理队列
 - NSIS 单文件安装包
 - GitHub Actions release 构建和发布资产
@@ -174,7 +174,7 @@ kbintake service status
 - `[[watch]]`：自动监控导入的目录配置
 - `[import].max_file_size_mb`：最大文件大小限制
 - `[import].inject_frontmatter`：是否给 Markdown 注入 metadata
-- `[import].language`：输出语言（`"en"` 或 `"zh-CN"`）
+- `[import].language`：输出语言（`"en"` 或 `"zh-CN"`），同时控制 Explorer 右键菜单文字
 - `[import].auto_open_obsidian`：导入后自动在 Obsidian 中打开
 - `[agent].poll_interval_secs`：后台服务轮询间隔
 

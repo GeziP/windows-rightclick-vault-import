@@ -145,6 +145,8 @@ Implemented:
 - Toast notification messages localized (success, queued, failure)
 - Dry-run table header localized
 - Error messages in config, processor, explorer, service modules localized
+- Explorer right-click menu text localized (registry default value uses `tr()`)
+- Language read via `AppConfig::load_or_init_in()` to avoid DB dependency
 - Defaults to `"en"` when `language` is unset
 
 Still open for `#61`:

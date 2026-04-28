@@ -21,9 +21,11 @@ Use this together with:
 
 Recent v2 commits on this branch:
 
+- `2b89996` Fix Explorer language detection and i18n template formatting
+- `267a496` Localize Explorer context menu text based on config language
+- `cd0175f` Fix vault audit path separator normalization
+- `6f87a27` Update documentation for v2.0 features
 - `f4e903e` Add --tags, vault audit, and --clipboard features (#64, #65, #66)
-- `1653ef6` Win11 native top-level context menu + COM icon + GHA validation
-- `0f20293` Add TUI edit mode: target obsidian_vault and watch config fields
 - `098f808` Add Service Watch Mode, TUI text input, and Obsidian auto-open (#60, #62, #63)
 - `51453c6` Add TUI settings, Obsidian URI, and Watch Mode completion (#60, #62, #63)
 - `5d41f48` Add manual template override for import (#58)
@@ -77,6 +79,10 @@ For v2.0 work, use:
 
 - `[import].language` config option
 - All CLI output, toast, and TUI labels translated
+- Explorer right-click menu text localized based on config language
+  - `explorer/mod.rs`: `build_registrations()` uses `tr()` for menu titles
+  - `main.rs`/`kbintakew.rs`: dispatch reads config via `AppConfig::load_or_init_in()` (not `App::bootstrap_at()` which requires DB)
+  - Registry menu text updates on `explorer install` — users must re-run after changing language
 
 ### Phase 1 / `#62` Watch Mode
 

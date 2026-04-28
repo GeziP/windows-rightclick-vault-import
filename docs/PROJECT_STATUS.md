@@ -76,6 +76,7 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
 - `[import].language` config option (`"en"` or `"zh-CN"`)
 - All CLI output, toast notifications, and error messages translated
 - TUI labels translated
+- Explorer right-click menu text localized (e.g. "添加到知识库" for zh-CN)
 
 #### Epic #62: Watch Mode
 

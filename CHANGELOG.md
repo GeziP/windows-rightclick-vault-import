@@ -17,6 +17,7 @@ Major release adding template-based imports, Watch Mode, TUI settings, localizat
 - `agent.watch_in_service` config flag for Watch Mode in Windows Service
 - `kbintake tui` interactive terminal settings with target management, import settings, watch configs, and templates tabs
 - zh-CN localization via `[import].language = "zh-CN"` config option
+- Explorer right-click menu text localized (e.g. "添加到知识库" for zh-CN, "Add to Knowledge Base" for en)
 - `kbintake obsidian open --vault <name> <path>` command
 - Per-target `obsidian_vault` config field and global `auto_open_obsidian` flag
 - `--open` CLI flag to open imported notes in Obsidian after import
