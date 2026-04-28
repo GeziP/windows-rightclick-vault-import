@@ -94,10 +94,13 @@ Implemented:
 - Locked-file retry with backoff (3 attempts, 1s intervals)
 - Reuses `resolve_import_intent()` for routing/template engine
 - Queues files into existing SQLite import pipeline
+- Windows Service integration: `agent.watch_in_service` config flag spawns
+  watcher thread alongside queue processor on service start
+- `Arc<AtomicBool>` shutdown flag for graceful service stop
 
 Still open for `#62`:
 
-- Integration with Windows Service mode for auto-start
+(None)
 
 ### Phase 1 / Epic `#60` TUI settings
 
@@ -112,7 +115,7 @@ Implemented:
 
 Still open for `#60`:
 
-- Full text input for adding new targets/paths (shows CLI hints)
+- Full text input for watch configs (target, debounce, extensions, template fields)
 - More advanced editing of template frontmatter
 
 ### Phase 1 / Epic `#63` Obsidian URI integration
@@ -123,11 +126,14 @@ Implemented:
 - Cross-platform URI launch (cmd /start on Windows, xdg-open on Linux)
 - URL-encoded vault and file parameters
 - `urlencoding` crate for proper URI escaping
+- Per-target `obsidian_vault` config field
+- Global `[import].auto_open_obsidian` boolean flag
+- `--open` CLI flag for explicit per-import override
+- Auto-opens markdown notes after successful import (worker.rs + CLI handler)
 
 Still open for `#63`:
 
-- Config-level `obsidian_vault` binding (per-target vault names)
-- Auto-open note after successful import (opt-in flag)
+- TUI/UX for setting `obsidian_vault` on targets (field exists, but no dedicated editor)
 
 ### Phase 1 / Epic `#61` zh-CN localization
 

@@ -20,6 +20,8 @@ Use this together with:
 
 Recent v2 commits on this branch:
 
+- `098f808` Add Service Watch Mode, TUI text input, and Obsidian auto-open (#60, #62, #63)
+- `51453c6` Add TUI settings, Obsidian URI, and Watch Mode completion (#60, #62, #63)
 - `5d41f48` Add manual template override for import (#58)
 - `5a15f4d` Add kbintake-com COM DLL spike for Windows 11 native context menu
 - `a3c9004` Add v2 handoff notes for follow-up work
@@ -149,10 +151,13 @@ Implemented:
 - Locked-file retry with backoff (3 attempts, 1s intervals)
 - Reuses `resolve_import_intent()` for routing/template engine
 - Queues files into existing SQLite import pipeline
+- Windows Service integration: `agent.watch_in_service` config flag
+  spawns watcher thread alongside queue processor
+- `Arc<AtomicBool>` shutdown flag for graceful service stop
 
 Still open in `#62`:
 
-- Integration with Windows Service mode for auto-start
+(None)
 
 ### Phase 1 / `#60` TUI settings
 
@@ -161,6 +166,7 @@ Implemented:
 - `kbintake tui` — interactive terminal settings interface
 - Tabbed layout: Targets, Import, Watch, Templates
 - Keyboard shortcuts for navigation, save, target management
+- Text input overlay for adding targets (name + path) and watch paths
 - `ratatui` + `crossterm` dependencies
 - All labels localized
 
@@ -171,6 +177,10 @@ Implemented:
 - `kbintake obsidian open --vault <name> <note_path>`
 - Cross-platform URI launch
 - URL encoding via `urlencoding` crate
+- Per-target `obsidian_vault` config field
+- Global `[import].auto_open_obsidian` flag
+- `--open` CLI flag for explicit per-import override
+- Auto-opens markdown notes after successful import
 
 ### Phase 1 / `#61` zh-CN localization
 
@@ -214,9 +224,9 @@ keys or the DLL to be signed.
 
 ### After that:
 
-- Windows Service integration for Watch Mode auto-start (`#62`)
-- TUI enhancements: full text input, template editing
-- Config-level `obsidian_vault` binding (`#63`)
+- TUI enhancements: full text input for watch configs (target/debounce/extensions/template)
+- Config-level `obsidian_vault` binding per target (#63) — field exists, UX for setting it in TUI is basic
+- COM DLL real install/uninstall validation on Windows 11 (`#57`)
 
 ## Validation State At Handoff
 
@@ -227,6 +237,8 @@ cargo test --locked                            # 165 tests (113 unit + 52 integr
 cargo clippy --all-targets --all-features -- -D warnings
 cargo build --release                          # kbintake + kbintake-com
 ```
+
+All three remaining Phase 1 features implemented and verified.
 
 ## Files Most Relevant To Continue From
 
