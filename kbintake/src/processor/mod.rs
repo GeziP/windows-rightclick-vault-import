@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod copier;
 pub mod deduper;
 pub mod dry_run;

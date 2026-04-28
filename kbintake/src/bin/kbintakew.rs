@@ -46,15 +46,17 @@ fn main() -> ExitCode {
         Commands::Import {
             target,
             template,
+            tags,
             process,
             dry_run,
             json,
             open,
+            clipboard,
             paths,
         } => app::App::bootstrap_at(app_data_dir)
             .and_then(|app| {
                 cli::handle_import_command(
-                    &app, target, template, process, dry_run, json, open, paths,
+                    &app, target, template, tags, process, dry_run, json, open, clipboard, paths,
                 )
             })
             .map_err(|err| (CommandKind::Import, err)),
@@ -84,10 +86,13 @@ fn main() -> ExitCode {
                 ExplorerCommands::RunImport {
                     queue_only,
                     template,
+                    tags,
                     paths,
                 },
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_explorer_run_import(&app, queue_only, template, paths))
+            .and_then(|app| {
+                cli::handle_explorer_run_import(&app, queue_only, template, tags, paths)
+            })
             .map_err(|err| {
                 cli::handle_explorer_run_import_error(&err);
                 (CommandKind::Explorer, err)

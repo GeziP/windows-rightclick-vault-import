@@ -36,6 +36,8 @@ pub enum Commands {
         target: Option<String>,
         #[arg(long, short)]
         template: Option<String>,
+        #[arg(long, help = "Comma-separated tags to inject into frontmatter")]
+        tags: Option<String>,
         #[arg(long)]
         process: bool,
         #[arg(long)]
@@ -44,6 +46,8 @@ pub enum Commands {
         json: bool,
         #[arg(long, help = "Open imported notes in Obsidian after import")]
         open: bool,
+        #[arg(long, help = "Read file paths from Windows clipboard")]
+        clipboard: bool,
         paths: Vec<PathBuf>,
     },
     Jobs {
@@ -195,6 +199,15 @@ pub enum VaultCommands {
         #[arg(long, help = "Output stats as JSON")]
         json: bool,
     },
+    #[command(about = "Audit vault for orphan, missing, and duplicate files")]
+    Audit {
+        #[arg(long, help = "Audit a single target ID or name")]
+        target: Option<String>,
+        #[arg(long, help = "Auto-fix issues (clean missing records, deduplicate)")]
+        fix: bool,
+        #[arg(long, help = "Output audit report as JSON")]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -224,6 +237,8 @@ pub enum ExplorerCommands {
         queue_only: bool,
         #[arg(long, help = "Template name to use for this import")]
         template: Option<String>,
+        #[arg(long, help = "Comma-separated tags to inject")]
+        tags: Option<String>,
         paths: Vec<PathBuf>,
     },
 }
@@ -268,14 +283,34 @@ pub fn handle_import_command(
     app: &App,
     target_id: Option<String>,
     template: Option<String>,
+    tags: Option<String>,
     process: bool,
     dry_run: bool,
     json: bool,
     open: bool,
+    clipboard: bool,
     paths: Vec<PathBuf>,
 ) -> Result<i32> {
+    let cli_tags: Vec<String> = tags
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut all_paths = paths;
+    if clipboard {
+        let clip_paths = crate::clipboard::read_clipboard_paths()?;
+        all_paths.extend(clip_paths);
+    }
+
     if dry_run {
-        let rows = crate::processor::dry_run::preview_import(app, target_id, template, paths)?;
+        let rows = crate::processor::dry_run::preview_import(
+            app, target_id, template, &cli_tags, all_paths,
+        )?;
         let lang = app.config.language();
         if json {
             println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -285,7 +320,7 @@ pub fn handle_import_command(
         return Ok(exit_codes::SUCCESS);
     }
 
-    let outcome = handle_import(app, target_id, template, paths)?;
+    let outcome = handle_import(app, target_id, template, &cli_tags, all_paths)?;
     if process {
         scheduler::drain_queue(app)?;
         if open {
@@ -300,6 +335,7 @@ pub fn handle_import(
     app: &App,
     target_id: Option<String>,
     template: Option<String>,
+    cli_tags: &[String],
     paths: Vec<PathBuf>,
 ) -> Result<ImportOutcome> {
     let lang = app.config.language();
@@ -354,7 +390,10 @@ pub fn handle_import(
 
     let mut count = 0usize;
     for (file, target, _) in routed_files {
-        let item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
+        let mut item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
+        if !cli_tags.is_empty() {
+            item.cli_tags = Some(cli_tags.join(","));
+        }
         repo.insert_item(&item)?;
         repo.insert_event(&DomainEvent::new(
             "item",
@@ -1300,10 +1339,20 @@ pub fn handle_explorer_run_import(
     app: &App,
     queue_only: bool,
     template: Option<String>,
+    tags: Option<String>,
     paths: Vec<PathBuf>,
 ) -> Result<i32> {
+    let cli_tags: Vec<String> = tags
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
     let lang = app.config.language();
-    let outcome = handle_import(app, None, template, paths)?;
+    let outcome = handle_import(app, None, template, &cli_tags, paths)?;
     if queue_only {
         let toast = ToastContent {
             title: tr("toast.title", lang),
@@ -1455,6 +1504,7 @@ struct VaultStatsRow {
 pub fn handle_vault(app: &App, command: VaultCommands) -> Result<()> {
     match command {
         VaultCommands::Stats { target, json } => handle_vault_stats(app, target, json),
+        VaultCommands::Audit { target, fix, json } => handle_vault_audit(app, target, fix, json),
     }
 }
 
@@ -1572,6 +1622,141 @@ fn format_timestamp(value: &str) -> String {
         .unwrap_or_else(|_| value.to_string())
 }
 
+fn handle_vault_audit(
+    app: &App,
+    target_filter: Option<String>,
+    fix: bool,
+    json: bool,
+) -> Result<()> {
+    use crate::processor::audit;
+
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+    let lang = app.config.language();
+
+    let targets = if let Some(target_filter) = target_filter {
+        let target = app.config.target_any_by_id(&target_filter)?;
+        vec![target.clone()]
+    } else {
+        app.config
+            .targets
+            .iter()
+            .filter(|t| t.is_active())
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    if targets.is_empty() {
+        println!("{}", tr("cli.no_active_targets", lang));
+        return Ok(());
+    }
+
+    let mut reports = Vec::new();
+    for target in &targets {
+        let report = audit::audit_vault(target, &repo)?;
+        reports.push(report);
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&reports)?);
+        return Ok(());
+    }
+
+    for report in &reports {
+        let issue_count = report.orphan_files.len()
+            + report.missing_files.len()
+            + report.duplicate_records.len()
+            + report.malformed_frontmatter.len();
+
+        println!(
+            "{}",
+            tr("cli.audit_target_header", lang)
+                .replace("{0}", &report.target_name)
+                .replace("{1}", &issue_count.to_string())
+        );
+
+        if !report.orphan_files.is_empty() {
+            println!(
+                "{}",
+                tr("cli.audit_orphan", lang).replace("{}", &report.orphan_files.len().to_string())
+            );
+            for path in &report.orphan_files {
+                println!("  {path}");
+            }
+        }
+
+        if !report.missing_files.is_empty() {
+            println!(
+                "{}",
+                tr("cli.audit_missing", lang)
+                    .replace("{}", &report.missing_files.len().to_string())
+            );
+            for entry in &report.missing_files {
+                println!("  {} ({})", entry.source_name, entry.stored_path);
+            }
+        }
+
+        if !report.duplicate_records.is_empty() {
+            let dup_count: usize = report
+                .duplicate_records
+                .iter()
+                .map(|g| g.records.len().saturating_sub(1))
+                .sum();
+            println!(
+                "{}",
+                tr("cli.audit_duplicate", lang).replace("{}", &dup_count.to_string())
+            );
+            for group in &report.duplicate_records {
+                println!(
+                    "  SHA-256: {} ({} records)",
+                    group.sha256,
+                    group.records.len()
+                );
+                for entry in &group.records {
+                    println!("    {} → {}", entry.source_name, entry.stored_path);
+                }
+            }
+        }
+
+        if !report.malformed_frontmatter.is_empty() {
+            println!(
+                "{}",
+                tr("cli.audit_malformed", lang)
+                    .replace("{}", &report.malformed_frontmatter.len().to_string())
+            );
+            for path in &report.malformed_frontmatter {
+                println!("  {path}");
+            }
+        }
+
+        if issue_count == 0 {
+            println!("{}", tr("cli.audit_clean", lang));
+        }
+
+        if fix && issue_count > 0 {
+            let fix_result = audit::fix_audit_issues(
+                app.config
+                    .targets
+                    .iter()
+                    .find(|t| t.name == report.target_name)
+                    .unwrap(),
+                &repo,
+                report,
+            )?;
+            println!(
+                "{}",
+                tr("cli.audit_fix_summary", lang)
+                    .replace("{0}", &fix_result.cleaned_missing.to_string())
+                    .replace("{1}", &fix_result.deduplicated.to_string())
+            );
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
 /// Start the file watcher for the given paths (or config defaults).
 /// This is a long-running operation that does not return.
 pub fn handle_watch(app: &App, paths: Option<Vec<PathBuf>>) -> Result<i32> {
@@ -1646,7 +1831,7 @@ mod tests {
         let missing = temp.path().join("missing.md");
         fs::write(&valid, "hello").unwrap();
 
-        let err = handle_import(&app, None, None, vec![valid, missing]).unwrap_err();
+        let err = handle_import(&app, None, None, &[], vec![valid, missing]).unwrap_err();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1661,7 +1846,7 @@ mod tests {
         let empty_dir = temp.path().join("empty");
         fs::create_dir(&empty_dir).unwrap();
 
-        let err = handle_import(&app, None, None, vec![empty_dir]).unwrap_err();
+        let err = handle_import(&app, None, None, &[], vec![empty_dir]).unwrap_err();
 
         assert!(err.to_string().contains("no importable files found"));
     }
@@ -1704,7 +1889,7 @@ mod tests {
         .unwrap();
         let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
 
-        let outcome = handle_import(&reloaded, None, None, vec![source]).unwrap();
+        let outcome = handle_import(&reloaded, None, None, &[], vec![source]).unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1823,7 +2008,7 @@ mod tests {
         let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
-        handle_import(&app, Some("archive".to_string()), None, vec![source]).unwrap();
+        handle_import(&app, Some("archive".to_string()), None, &[], vec![source]).unwrap();
 
         let err = handle_targets(
             &app,
@@ -1857,7 +2042,7 @@ mod tests {
         let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
-        handle_import(&app, Some("archive".to_string()), None, vec![source]).unwrap();
+        handle_import(&app, Some("archive".to_string()), None, &[], vec![source]).unwrap();
 
         handle_targets(
             &app,
@@ -1916,7 +2101,7 @@ mod tests {
         )
         .unwrap_err();
         let import_err =
-            handle_import(&app, Some("archive".to_string()), None, vec![source]).unwrap_err();
+            handle_import(&app, Some("archive".to_string()), None, &[], vec![source]).unwrap_err();
 
         assert!(rename_err.to_string().contains("archived"));
         assert!(default_err.to_string().contains("archived"));
@@ -1965,7 +2150,14 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        handle_import(&reloaded, Some("archive".to_string()), None, vec![source]).unwrap();
+        handle_import(
+            &reloaded,
+            Some("archive".to_string()),
+            None,
+            &[],
+            vec![source],
+        )
+        .unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1994,7 +2186,7 @@ mod tests {
         let source = temp.path().join("paper.pdf");
         fs::write(&source, "pdf").unwrap();
 
-        let outcome = handle_import(&app, None, None, vec![source]).unwrap();
+        let outcome = handle_import(&app, None, None, &[], vec![source]).unwrap();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -2028,7 +2220,8 @@ mod tests {
         let source = temp.path().join("paper.pdf");
         fs::write(&source, "pdf").unwrap();
 
-        let outcome = handle_import(&app, Some("default".to_string()), None, vec![source]).unwrap();
+        let outcome =
+            handle_import(&app, Some("default".to_string()), None, &[], vec![source]).unwrap();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -2047,7 +2240,8 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        let err = handle_import(&app, Some("missing".to_string()), None, vec![source]).unwrap_err();
+        let err =
+            handle_import(&app, Some("missing".to_string()), None, &[], vec![source]).unwrap_err();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -2069,7 +2263,9 @@ mod tests {
             &app,
             None,
             None,
+            None,
             true,
+            false,
             false,
             false,
             false,
@@ -2088,8 +2284,19 @@ mod tests {
         let large = temp.path().join("large.md");
         fs::write(&large, "too large").unwrap();
 
-        let code = handle_import_command(&app, None, None, true, false, false, false, vec![large])
-            .unwrap();
+        let code = handle_import_command(
+            &app,
+            None,
+            None,
+            None,
+            true,
+            false,
+            false,
+            false,
+            false,
+            vec![large],
+        )
+        .unwrap();
 
         assert_eq!(code, exit_codes::FILE_SIZE_EXCEEDED);
     }

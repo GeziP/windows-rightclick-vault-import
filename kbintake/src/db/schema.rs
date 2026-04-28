@@ -77,3 +77,7 @@ ON events(entity_type, entity_id, created_at);
 pub const MIGRATION_004_ITEM_STORED_SHA256: &str = r#"
 ALTER TABLE items ADD COLUMN stored_sha256 TEXT;
 "#;
+
+pub const MIGRATION_005_ITEM_CLI_TAGS: &str = r#"
+ALTER TABLE items ADD COLUMN cli_tags TEXT;
+"#;

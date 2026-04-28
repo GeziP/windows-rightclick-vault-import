@@ -1,6 +1,6 @@
 # KBIntake v2.0 Issue Map
 
-Last updated: 2026-04-27
+Last updated: 2026-04-28
 
 ## Purpose
 
@@ -205,6 +205,41 @@ Still required by Phase 1 tracker:
 - real Windows 11 Explorer UI test on a physical machine (right-click visibility, "Show more options", toast, end-to-end import)
 - go/no-go decision for v2.0 vs v2.1
 
+### Phase 2/3 / Epic `#64` Quick tag injection
+
+Implemented:
+
+- `--tags "urgent,alpha"` CLI flag on `kbintake import` and `explorer run-import`
+- DB migration 005: `items.cli_tags TEXT` column
+- `ItemJob.cli_tags` field, persisted through repository
+- `render_template()` merges CLI tags with template tags (case-insensitive dedup)
+- Tags merged into frontmatter via existing template_frontmatter path
+- Dry-run preview includes CLI tags
+- `--tags` on Explorer right-click via registry command args
+
+### Phase 2/3 / Epic `#65` Vault audit
+
+Implemented:
+
+- `kbintake vault audit [--target <name>] [--fix] [--json]` command
+- `processor/audit.rs`: scans vault directory with walkdir, cross-references manifest records
+- Detects 4 issue types: orphan files, missing files, duplicate SHA-256 records, malformed frontmatter
+- `--fix` auto-cleans manifest records for deleted files and deduplicates records (never deletes vault files)
+- `--json` outputs structured `Vec<AuditReport>`
+- i18n support for en/zh-CN audit messages
+- Repository methods: `list_manifests_by_target`, `mark_manifest_missing`, `mark_manifest_duplicate`
+
+### Phase 2/3 / Epic `#66` Clipboard import
+
+Implemented:
+
+- `kbintake import --clipboard` flag
+- `clipboard.rs`: reads Windows clipboard text via `Win32::System::DataExchange` API
+- Splits clipboard text by newlines, validates each line as existing file path
+- Merges clipboard paths with explicit `paths` arguments
+- Combinable with `--tags`, `--process`, `--dry-run`
+- `Win32_System_DataExchange` feature added to `windows` crate dependency
+
 ## Working Rule For Future v2 Slices
 
 Before coding:
@@ -216,10 +251,8 @@ Before coding:
 
 ## Recommended Next Slice
 
-Most justified next step from the current state:
+All planned v2.0 features implemented. Remaining:
 
-- Real Windows 11 validation of the `kbintake-com` DLL on a physical machine (`#57`) — GHA validates registry keys, but Explorer UI needs manual test
-
-After that:
-
-- Phase 2 features per `#55` tracker
+- Real Windows 11 validation of the `kbintake-com` DLL on a physical machine (`#57`)
+- Documentation pass (`#67`)
+- Release preparation (version bump, CHANGELOG, installer update)

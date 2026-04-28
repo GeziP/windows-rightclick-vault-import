@@ -20,6 +20,7 @@ pub struct ItemJob {
     pub duplicate_of: Option<String>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub cli_tags: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -51,6 +52,7 @@ impl ItemJob {
             duplicate_of: None,
             error_code: None,
             error_message: None,
+            cli_tags: None,
             created_at: now,
             updated_at: now,
         }

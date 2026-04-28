@@ -2,6 +2,7 @@ pub mod adapter;
 pub mod agent;
 pub mod app;
 pub mod cli;
+pub mod clipboard;
 pub mod config;
 pub mod db;
 pub mod domain;

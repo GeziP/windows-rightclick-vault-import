@@ -125,8 +125,8 @@ impl<'a> Repository<'a> {
             "INSERT INTO items (
                 item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                 source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                cli_tags, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 &item.item_id,
                 &item.batch_id,
@@ -143,6 +143,7 @@ impl<'a> Repository<'a> {
                 item.duplicate_of.as_deref(),
                 item.error_code.as_deref(),
                 item.error_message.as_deref(),
+                item.cli_tags.as_deref(),
                 item.created_at.to_rfc3339(),
                 item.updated_at.to_rfc3339()
             ],
@@ -154,7 +155,7 @@ impl<'a> Repository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                     source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                    created_at, updated_at
+                    cli_tags, created_at, updated_at
              FROM items WHERE batch_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![batch_id], row_to_item)?;
@@ -210,7 +211,7 @@ impl<'a> Repository<'a> {
             .query_row(
                 "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                         source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                        created_at, updated_at
+                        cli_tags, created_at, updated_at
                  FROM items WHERE status = ?1 ORDER BY created_at ASC LIMIT 1",
                 params![state_machine::STATUS_QUEUED],
                 row_to_item,
@@ -376,6 +377,48 @@ impl<'a> Repository<'a> {
             .map_err(Into::into)
     }
 
+    pub fn list_manifests_by_target(
+        &self,
+        target_id: &str,
+    ) -> Result<Vec<crate::processor::audit::ManifestEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT record_id, stored_path, source_name, sha256 FROM manifest_records WHERE target_id = ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![target_id], |row| {
+                Ok(crate::processor::audit::ManifestEntry {
+                    record_id: row.get(0)?,
+                    stored_path: row.get(1)?,
+                    source_name: row.get(2)?,
+                    sha256: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn mark_manifest_missing(&self, record_id: &str) -> Result<()> {
+        let rows = self.conn.execute(
+            "DELETE FROM manifest_records WHERE record_id = ?1",
+            params![record_id],
+        )?;
+        if rows == 0 {
+            return Err(anyhow::anyhow!("record not found: {record_id}"));
+        }
+        Ok(())
+    }
+
+    pub fn mark_manifest_duplicate(&self, record_id: &str) -> Result<()> {
+        let rows = self.conn.execute(
+            "DELETE FROM manifest_records WHERE record_id = ?1",
+            params![record_id],
+        )?;
+        if rows == 0 {
+            return Err(anyhow::anyhow!("record not found: {record_id}"));
+        }
+        Ok(())
+    }
+
     pub fn insert_event(&self, event: &DomainEvent) -> Result<()> {
         self.conn.execute(
             "INSERT INTO events (
@@ -480,8 +523,9 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ItemJob> {
         duplicate_of: row.get(12)?,
         error_code: row.get(13)?,
         error_message: row.get(14)?,
-        created_at: parse_utc(row.get(15)?)?,
-        updated_at: parse_utc(row.get(16)?)?,
+        cli_tags: row.get(15)?,
+        created_at: parse_utc(row.get(16)?)?,
+        updated_at: parse_utc(row.get(17)?)?,
     })
 }
 

@@ -42,15 +42,17 @@ fn main() -> ExitCode {
         Commands::Import {
             target,
             template,
+            tags,
             process,
             dry_run,
             json,
             open,
+            clipboard,
             paths,
         } => app::App::bootstrap_at(app_data_dir)
             .and_then(|app| {
                 cli::handle_import_command(
-                    &app, target, template, process, dry_run, json, open, paths,
+                    &app, target, template, tags, process, dry_run, json, open, clipboard, paths,
                 )
             })
             .map_err(|err| (CommandKind::Import, err)),
@@ -247,6 +249,7 @@ fn classify_error(kind: CommandKind, err: &Error) -> i32 {
         || message.contains("target already configured")
         || message.contains("target name")
         || message.contains("not a directory")
+        || message.contains("clipboard")
     {
         return exit_codes::INVALID_ARGUMENTS;
     }

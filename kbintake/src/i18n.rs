@@ -66,6 +66,15 @@ fn en(key: &str) -> &'static str {
         "cli.unsupported_status" => "unsupported status filter: {status}",
         "cli.dry_run_table_header" => "Source Path\tTarget\tRule\tDestination\tAction",
 
+        // -- Vault audit --
+        "cli.audit_target_header" => "Target: {0} — {1} issue(s)",
+        "cli.audit_orphan" => "Orphan files (in vault, not in manifest): {}",
+        "cli.audit_missing" => "Missing files (in manifest, file deleted): {}",
+        "cli.audit_duplicate" => "Duplicate records (same SHA-256): {} extra",
+        "cli.audit_malformed" => "Malformed frontmatter (missing kbintake_ fields): {}",
+        "cli.audit_clean" => "No issues found.",
+        "cli.audit_fix_summary" => "Fixed: {0} missing cleaned, {1} duplicates resolved",
+
         // -- Toast notifications --
         "toast.title" => "KBIntake",
         "toast.queued_single" => "Queued {count} item(s) for {target} using rule {rule}.",
@@ -234,6 +243,15 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "cli.json_table_mutual" => Some("--json 和 --table 不能同时使用"),
         "cli.unsupported_status" => Some("不支持的状态过滤: {status}"),
         "cli.dry_run_table_header" => Some("源路径\t目标\t规则\t目标位置\t操作"),
+
+        // -- Vault audit --
+        "cli.audit_target_header" => Some("目标: {0} — {1} 个问题"),
+        "cli.audit_orphan" => Some("孤立文件 (在 vault 中但不在 manifest 中): {}"),
+        "cli.audit_missing" => Some("缺失文件 (在 manifest 中但文件已删除): {}"),
+        "cli.audit_duplicate" => Some("重复记录 (相同 SHA-256): {} 条多余"),
+        "cli.audit_malformed" => Some("格式异常的 frontmatter (缺少 kbintake_ 字段): {}"),
+        "cli.audit_clean" => Some("未发现问题。"),
+        "cli.audit_fix_summary" => Some("已修复: {0} 条缺失记录已清理, {1} 条重复已解决"),
 
         // -- Toast notifications --
         "toast.title" => Some("KBIntake"),

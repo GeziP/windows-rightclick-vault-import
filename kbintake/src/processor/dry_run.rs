@@ -49,6 +49,7 @@ pub fn preview_import(
     app: &App,
     target_id: Option<String>,
     template: Option<String>,
+    cli_tags: &[String],
     paths: Vec<PathBuf>,
 ) -> Result<Vec<DryRunRow>> {
     if paths.is_empty() {
@@ -166,6 +167,7 @@ pub fn preview_import(
                         target_name: target.name.clone(),
                         batch_id: "dry-run".to_string(),
                     },
+                    cli_tags,
                 );
                 let subfolder = rendered.subfolder.clone();
                 let preview_root = match &subfolder {
@@ -302,7 +304,7 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        let rows = preview_import(&app, None, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![source]).unwrap();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -350,7 +352,7 @@ mod tests {
         let source = temp.path().join("paper.pdf");
         fs::write(&source, "preview").unwrap();
 
-        let rows = preview_import(&app, None, None, vec![source.clone()]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![source.clone()]).unwrap();
 
         assert_eq!(rows[0].template.as_deref(), Some("research-paper"));
         assert_eq!(rows[0].target.as_deref(), Some("archive"));
@@ -404,7 +406,7 @@ mod tests {
         );
         repo.insert_manifest(&record).unwrap();
 
-        let rows = preview_import(&app, None, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipDuplicate);
         assert_eq!(rows[0].target.as_deref(), Some("default"));
@@ -421,7 +423,7 @@ mod tests {
         let source = temp.path().join("large.md");
         fs::write(&source, "too large").unwrap();
 
-        let rows = preview_import(&app, None, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSizeLimit);
         assert!(rows[0].target.is_none());
@@ -441,7 +443,7 @@ mod tests {
             return;
         }
 
-        let rows = preview_import(&app, None, None, vec![link]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![link]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSymlink);
         assert!(rows[0].target.is_none());

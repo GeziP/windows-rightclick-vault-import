@@ -73,6 +73,17 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
     };
     repo.update_item_hash(&item.item_id, &hash, size as i64)?;
 
+    let cli_tags: Vec<String> = item
+        .cli_tags
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let rendered_template: Result<Option<template::RenderedTemplate>> =
         if let Some(template_config) = app.config.template_for_path(&source, size) {
             let resolved =
@@ -89,6 +100,7 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
                     target_name: target.name.clone(),
                     batch_id: item.batch_id.clone(),
                 },
+                &cli_tags,
             )))
         } else {
             Ok(None)

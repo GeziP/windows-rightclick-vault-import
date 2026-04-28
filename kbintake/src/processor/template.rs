@@ -52,19 +52,41 @@ pub fn default_template(templates: &[TemplateConfig]) -> Option<&TemplateConfig>
 pub fn render_template(
     template: &ResolvedTemplate,
     context: &TemplateRenderContext,
+    cli_tags: &[String],
 ) -> RenderedTemplate {
+    let mut tags: Vec<String> = template
+        .tags
+        .iter()
+        .map(|tag| render_string(tag, context))
+        .collect();
+    tags = merge_tags(&tags, cli_tags);
+
+    let mut frontmatter = render_table(&template.frontmatter, context);
+    if !cli_tags.is_empty() {
+        let existing_tags = frontmatter.remove("tags");
+        let rendered_cli: Vec<toml::Value> = cli_tags
+            .iter()
+            .map(|t| toml::Value::String(t.clone()))
+            .collect();
+        let merged = match existing_tags {
+            Some(toml::Value::Array(arr)) => {
+                let mut combined = arr;
+                combined.extend(rendered_cli);
+                dedupe_toml_values(&combined)
+            }
+            _ => rendered_cli,
+        };
+        frontmatter.insert("tags".to_string(), toml::Value::Array(merged));
+    }
+
     RenderedTemplate {
         name: template.name.clone(),
         subfolder: template
             .subfolder
             .as_deref()
             .map(|value| render_string(value, context)),
-        tags: template
-            .tags
-            .iter()
-            .map(|tag| render_string(tag, context))
-            .collect(),
-        frontmatter: render_table(&template.frontmatter, context),
+        tags,
+        frontmatter,
     }
 }
 
@@ -156,6 +178,18 @@ fn merge_tags(parent: &[String], child: &[String]) -> Vec<String> {
 
 fn dedupe_tags(tags: &[String]) -> Vec<String> {
     merge_tags(&[], tags)
+}
+
+fn dedupe_toml_values(values: &[toml::Value]) -> Vec<toml::Value> {
+    let mut seen = HashSet::new();
+    values
+        .iter()
+        .filter(|v| {
+            let key = v.to_string().to_ascii_lowercase();
+            seen.insert(key)
+        })
+        .cloned()
+        .collect()
 }
 
 fn render_table(table: &toml::Table, context: &TemplateRenderContext) -> toml::Table {
@@ -784,7 +818,7 @@ mod tests {
             toml::Value::String("{{batch_id}}".to_string()),
         );
 
-        let rendered = render_template(&resolved, &render_context());
+        let rendered = render_template(&resolved, &render_context(), &[]);
 
         assert_eq!(rendered.subfolder.as_deref(), Some("papers/2026-04-27"));
         assert_eq!(rendered.tags, vec!["pdf", "research"]);
@@ -824,7 +858,7 @@ mod tests {
             ),
         );
 
-        let rendered = render_template(&resolved, &render_context());
+        let rendered = render_template(&resolved, &render_context(), &[]);
 
         assert_eq!(
             rendered.frontmatter["tags"].as_array().unwrap(),
@@ -847,7 +881,7 @@ mod tests {
             toml::Value::String("{{#if file_ext == \"pdf\"}}paper{{#else}}note{{/if}}".to_string()),
         );
 
-        let rendered = render_template(&resolved, &render_context());
+        let rendered = render_template(&resolved, &render_context(), &[]);
 
         assert_eq!(rendered.frontmatter["type"].as_str(), Some("paper"));
     }
@@ -863,7 +897,7 @@ mod tests {
             ),
         );
 
-        let rendered = render_template(&resolved, &render_context());
+        let rendered = render_template(&resolved, &render_context(), &[]);
 
         assert_eq!(rendered.frontmatter["size_label"].as_str(), Some("large"));
     }
@@ -879,7 +913,7 @@ mod tests {
             ),
         );
 
-        let rendered = render_template(&resolved, &render_context());
+        let rendered = render_template(&resolved, &render_context(), &[]);
 
         assert_eq!(rendered.frontmatter["status"].as_str(), Some("big-pdf"));
     }
@@ -892,7 +926,7 @@ mod tests {
             toml::Value::String("{{#if file_size_kb > }}good{{#else}}fallback{{/if}}".to_string()),
         );
 
-        let rendered = render_template(&resolved, &render_context());
+        let rendered = render_template(&resolved, &render_context(), &[]);
 
         assert_eq!(rendered.frontmatter["status"].as_str(), Some("fallback"));
     }
