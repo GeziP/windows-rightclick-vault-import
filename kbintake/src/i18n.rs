@@ -154,6 +154,10 @@ fn en(key: &str) -> &'static str {
         "explorer.uninstall_unsupported" => "Explorer context-menu uninstallation is only supported on Windows",
         "explorer.menu_file" => "Add to Knowledge Base",
         "explorer.menu_dir" => "Add Folder to Knowledge Base",
+        "explorer.menu_title" => "KBIntake",
+        "explorer.sub_import" => "Import",
+        "explorer.sub_queue" => "Queue",
+        "explorer.sub_settings" => "Settings...",
 
         // -- Service --
         "service.app_data_init" => "service app data directory already initialized",
@@ -334,6 +338,10 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "explorer.uninstall_unsupported" => Some("Explorer 右键菜单卸载仅在 Windows 上支持"),
         "explorer.menu_file" => Some("添加到知识库"),
         "explorer.menu_dir" => Some("添加文件夹到知识库"),
+        "explorer.menu_title" => Some("KBIntake"),
+        "explorer.sub_import" => Some("导入处理"),
+        "explorer.sub_queue" => Some("仅入队"),
+        "explorer.sub_settings" => Some("设置..."),
 
         // -- Service --
         "service.app_data_init" => Some("服务数据目录已初始化"),

@@ -241,6 +241,8 @@ pub enum ExplorerCommands {
         tags: Option<String>,
         paths: Vec<PathBuf>,
     },
+    #[command(hide = true, about = "Launch TUI settings from Explorer context menu")]
+    Settings,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1292,9 +1294,9 @@ pub fn handle_explorer(command: ExplorerCommands, lang: &str) -> Result<()> {
         ExplorerCommands::Install {
             exe_path,
             icon_path,
-            queue_only,
+            queue_only: _,
         } => {
-            let mut options = crate::explorer::default_install_options(queue_only, lang)?;
+            let mut options = crate::explorer::default_install_options(lang)?;
             if let Some(exe_path) = exe_path {
                 options.exe_path = exe_path;
                 if icon_path.is_none() {
@@ -1306,15 +1308,13 @@ pub fn handle_explorer(command: ExplorerCommands, lang: &str) -> Result<()> {
                 options.icon_path = icon_path;
             }
 
-            let registrations = crate::explorer::install(&options)?;
-            for registration in registrations {
-                println!(
-                    "{}: HKCU\\{}",
-                    tr("cli.registered", lang),
-                    registration.menu_key
-                );
-                println!("{}: {}", tr("cli.command", lang), registration.command);
-                if let Some(icon_path) = registration.icon_path {
+            let menus = crate::explorer::install(&options)?;
+            for menu in &menus {
+                println!("{}: HKCU\\{}", tr("cli.registered", lang), menu.menu_key);
+                for sub in &menu.sub_items {
+                    println!("  [{}] {}", sub.sub_key, sub.command);
+                }
+                if let Some(icon_path) = &menu.icon_path {
                     println!("{}: {}", tr("cli.icon", lang), icon_path.display());
                 }
             }
@@ -1335,6 +1335,9 @@ pub fn handle_explorer(command: ExplorerCommands, lang: &str) -> Result<()> {
         }
         ExplorerCommands::RunImport { .. } => {
             anyhow::bail!("{}", tr("cli.explorer_run_import_hidden", lang))
+        }
+        ExplorerCommands::Settings => {
+            anyhow::bail!("explorer settings is only intended for the hidden GUI launcher")
         }
     }
 }

@@ -81,13 +81,26 @@ fn main() -> ExitCode {
             let data_dir = app_data_dir
                 .clone()
                 .unwrap_or_else(kbintake::config::default_app_data_dir);
-            let lang = kbintake::config::AppConfig::load_or_init_in(data_dir)
-                .ok()
-                .map(|config| config.language().to_string())
-                .unwrap_or_else(|| "en".to_string());
-            cli::handle_explorer(command, &lang)
-                .map(|()| exit_codes::SUCCESS)
-                .map_err(|err| (CommandKind::Explorer, err))
+            match command {
+                cli::ExplorerCommands::Settings => {
+                    kbintake::config::AppConfig::load_or_init_in(data_dir)
+                        .map_err(|err| (CommandKind::Config, err))
+                        .and_then(|config| {
+                            kbintake::tui::run_settings_tui(config)
+                                .map(|()| exit_codes::SUCCESS)
+                                .map_err(|err| (CommandKind::Config, err))
+                        })
+                }
+                _ => {
+                    let lang = kbintake::config::AppConfig::load_or_init_in(data_dir)
+                        .ok()
+                        .map(|config| config.language().to_string())
+                        .unwrap_or_else(|| "en".to_string());
+                    cli::handle_explorer(command, &lang)
+                        .map(|()| exit_codes::SUCCESS)
+                        .map_err(|err| (CommandKind::Explorer, err))
+                }
+            }
         }
         Commands::Service { command } => {
             handle_service_command(command, app_data_dir).map_err(|err| (CommandKind::Service, err))
