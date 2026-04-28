@@ -397,6 +397,14 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
             ui.input_buffer.pop();
             true
         }
+        KeyCode::Tab => {
+            try_path_complete(ui);
+            true
+        }
+        KeyCode::Char('o') if is_path_input_mode(&ui.input_mode) => {
+            try_folder_picker(ui);
+            true
+        }
         KeyCode::Char(c) => {
             ui.input_buffer.push(c);
             true
@@ -549,7 +557,11 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
             Style::default().fg(Color::Yellow),
         )),
         Line::from(Span::styled(
-            "[Enter] confirm  [Esc] cancel  [Backspace] delete",
+            if is_path_input_mode(&ui.input_mode) {
+                "[Enter] confirm  [Esc] cancel  [Tab] complete  [o] browse folder"
+            } else {
+                "[Enter] confirm  [Esc] cancel  [Backspace] delete"
+            },
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -947,3 +959,128 @@ fn handle_edit(ui: &mut SettingsUi) {
         _ => {}
     }
 }
+
+fn is_path_input_mode(mode: &InputMode) -> bool {
+    matches!(
+        mode,
+        InputMode::AddingTargetPath | InputMode::AddingWatchPath | InputMode::EditingWatchPath(_)
+    )
+}
+
+fn try_path_complete(ui: &mut SettingsUi) {
+    if !is_path_input_mode(&ui.input_mode) {
+        return;
+    }
+    let input = &ui.input_buffer;
+    if input.is_empty() {
+        return;
+    }
+
+    let path = PathBuf::from(input);
+    let (parent, prefix) = if input.ends_with('\\') || input.ends_with('/') {
+        (path.clone(), String::new())
+    } else {
+        let parent = path
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .to_path_buf();
+        let prefix = path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
+        (parent, prefix)
+    };
+
+    let prefix_lower = prefix.to_lowercase();
+    let Ok(entries) = std::fs::read_dir(&parent) else {
+        return;
+    };
+    let mut matches: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .to_string()
+                .to_lowercase()
+                .starts_with(&prefix_lower)
+        })
+        .map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            let sep = if e.path().is_dir() { "\\" } else { "" };
+            format!("{}{}", name, sep)
+        })
+        .collect();
+
+    if matches.is_empty() {
+        return;
+    }
+    matches.sort();
+
+    if matches.len() == 1 {
+        ui.input_buffer = parent.join(&matches[0]).display().to_string();
+    } else {
+        let mut common = matches[0].clone();
+        for m in &matches[1..] {
+            let common_len = common
+                .chars()
+                .zip(m.chars())
+                .take_while(|(a, b)| a.eq_ignore_ascii_case(b))
+                .count();
+            common.truncate(common_len);
+        }
+        if common.len() > prefix.len() {
+            ui.input_buffer = parent.join(&common).display().to_string();
+        }
+        ui.message = format!("Matches: {}", matches.join(", "));
+    }
+}
+
+#[cfg(windows)]
+fn try_folder_picker(ui: &mut SettingsUi) {
+    if !is_path_input_mode(&ui.input_mode) {
+        return;
+    }
+
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::UI::Shell::{
+        FileOpenDialog, IFileDialog, FOS_PICKFOLDERS, SIGDN_FILESYSPATH,
+    };
+
+    let _ = disable_raw_mode();
+    let _ = execute!(io::stdout(), LeaveAlternateScreen);
+
+    let result = unsafe {
+        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let com_initialized = hr.is_ok();
+        let result = (|| -> Option<String> {
+            let dialog: IFileDialog =
+                CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+            let mut options = dialog.GetOptions().ok()?;
+            options |= FOS_PICKFOLDERS;
+            dialog.SetOptions(options).ok()?;
+            if dialog.Show(None).is_err() {
+                return None;
+            }
+            let item = dialog.GetResult().ok()?;
+            let display_name = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+            display_name.to_string().ok()
+        })();
+        if com_initialized {
+            CoUninitialize();
+        }
+        result
+    };
+
+    let _ = execute!(io::stdout(), EnterAlternateScreen);
+    let _ = enable_raw_mode();
+
+    if let Some(path) = result {
+        ui.input_buffer = path;
+    }
+}
+
+#[cfg(not(windows))]
+fn try_folder_picker(_ui: &mut SettingsUi) {}
