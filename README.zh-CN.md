@@ -82,9 +82,10 @@ winget install GeziP.KBIntake
 ### Explorer 右键方式
 
 1. 在资源管理器中右键一个文件或文件夹。
-2. 选择 KBIntake 菜单项。
-3. 导入完成后会出现 Windows toast 通知。
-4. 打开 PowerShell 查看任务：
+2. 选择 KBIntake 菜单项展开子菜单。
+3. 选择"导入处理"（立即处理）、"仅入队"（稍后处理）或"设置"（打开设置界面）。
+4. 导入完成后会出现 Windows toast 通知。
+5. 打开 PowerShell 查看任务：
 
 ```powershell
 kbintake jobs list
@@ -100,7 +101,7 @@ kbintake jobs list
 
 ## 已有功能
 
-- Explorer 文件和文件夹右键导入
+- Explorer 级联右键菜单（导入处理 / 仅入队 / 设置）
 - Windows 11 原生顶级右键菜单（COM DLL）
 - Explorer 导入不弹控制台窗口
 - 成功、重复、失败场景的 Windows toast 通知

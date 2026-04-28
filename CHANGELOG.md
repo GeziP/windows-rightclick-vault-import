@@ -28,11 +28,13 @@ Major release adding template-based imports, Watch Mode, TUI settings, localizat
 - Windows 11 native context menu: COM DLL (`kbintake-com/`) with `IExplorerCommand` implementation
 - GHA workflow for COM DLL registry validation
 - Route-hit visibility in dry-run output, CLI output, and Explorer toast notifications
+- Cascading Explorer context menu with Import, Queue, and Settings sub-items (TortoiseGit-style)
 
 ### Changed
 
 - Dry-run output now shows target, matched routing rule, template destination, and frontmatter preview
 - Explorer import toast text includes routing rule context
+- Explorer right-click menu upgraded from single action to cascading submenu (Import / Queue / Settings)
 - SQLite schema version bumped to 5
 - `windows` crate dependency updated with `Win32_System_DataExchange` feature for clipboard support
 

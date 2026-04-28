@@ -56,9 +56,10 @@ winget install GeziP.KBIntake
 Explorer flow:
 
 1. Right-click a file or folder.
-2. Choose the KBIntake action.
-3. KBIntake imports it silently and shows a Windows toast notification.
-4. Inspect the result:
+2. Choose the KBIntake action to expand the submenu.
+3. Select Import (process immediately), Queue (queue for later), or Settings (open TUI).
+4. KBIntake imports it silently and shows a Windows toast notification.
+5. Inspect the result:
 
 ```powershell
 kbintake jobs list
@@ -74,7 +75,7 @@ kbintake jobs list
 
 ## Features
 
-- Explorer right-click import for files and folders
+- Explorer cascading right-click menu with Import / Queue / Settings sub-items
 - Windows 11 native top-level context menu via COM DLL
 - no-console Explorer flow through `kbintakew.exe`
 - Windows toast notifications for success, duplicate, and failure cases
