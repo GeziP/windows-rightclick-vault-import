@@ -9,7 +9,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Tabs},
@@ -27,8 +27,6 @@ enum TabId {
     Watch = 2,
     Templates = 3,
 }
-
-const TAB_TITLES: &[&str] = &["Targets", "Import", "Watch", "Templates"];
 
 /// Text input mode for the overlay.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +47,7 @@ enum InputMode {
 struct SettingsUi {
     config: AppConfig,
     active_tab: TabId,
+    selected_index: usize,
     message: String,
     pending_save: bool,
     input_mode: InputMode,
@@ -61,6 +60,7 @@ impl SettingsUi {
         Self {
             config,
             active_tab: TabId::Targets,
+            selected_index: 0,
             message: String::new(),
             pending_save: false,
             input_mode: InputMode::Normal,
@@ -73,6 +73,51 @@ impl SettingsUi {
         self.config.save()?;
         self.message = tr("tui.config_saved", self.config.language());
         Ok(())
+    }
+
+    fn lang(&self) -> &str {
+        self.config.language()
+    }
+
+    fn tab_titles(&self) -> Vec<Span<'static>> {
+        let keys = [
+            "tui.tab_targets",
+            "tui.tab_import",
+            "tui.tab_watch",
+            "tui.tab_templates",
+        ];
+        keys.iter()
+            .map(|k| Span::raw(tr(k, self.lang()).to_string()))
+            .collect()
+    }
+
+    fn item_count(&self) -> usize {
+        match self.active_tab {
+            TabId::Targets => self.config.targets.len(),
+            TabId::Watch => self.config.watch.len(),
+            TabId::Templates => self.config.templates.len(),
+            TabId::Import => 0,
+        }
+    }
+
+    fn clamp_selected(&mut self) {
+        let count = self.item_count();
+        if self.selected_index >= count && count > 0 {
+            self.selected_index = count - 1;
+        }
+    }
+
+    fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    fn move_down(&mut self) {
+        let count = self.item_count();
+        if count > 0 && self.selected_index < count - 1 {
+            self.selected_index += 1;
+        }
     }
 }
 
@@ -91,9 +136,9 @@ pub fn run_settings_tui(config: AppConfig) -> Result<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 
     if let Ok(()) = result {
-        println!("{}", tr("tui.exiting", ui.config.language()));
+        println!("{}", tr("tui.exiting", ui.lang()));
     } else {
-        eprintln!("{}", tr("tui.exiting", ui.config.language()));
+        eprintln!("{}", tr("tui.exiting", ui.lang()));
     }
 
     result
@@ -123,10 +168,23 @@ fn run_loop(
 
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                KeyCode::Char('1') => ui.active_tab = TabId::Targets,
-                KeyCode::Char('2') => ui.active_tab = TabId::Import,
-                KeyCode::Char('3') => ui.active_tab = TabId::Watch,
-                KeyCode::Char('4') => ui.active_tab = TabId::Templates,
+                KeyCode::Char('1') => {
+                    ui.active_tab = TabId::Targets;
+                    ui.selected_index = 0;
+                }
+                KeyCode::Char('2') => {
+                    ui.active_tab = TabId::Import;
+                }
+                KeyCode::Char('3') => {
+                    ui.active_tab = TabId::Watch;
+                    ui.selected_index = 0;
+                }
+                KeyCode::Char('4') => {
+                    ui.active_tab = TabId::Templates;
+                    ui.selected_index = 0;
+                }
+                KeyCode::Up => ui.move_up(),
+                KeyCode::Down => ui.move_down(),
                 KeyCode::Char('s') => {
                     if let Err(e) = ui.save_config() {
                         ui.message = format!("ERROR: {e:#}");
@@ -140,11 +198,40 @@ fn run_loop(
                 KeyCode::Char('f') => handle_toggle_frontmatter(ui),
                 KeyCode::Char('l') => handle_toggle_language(ui),
                 KeyCode::Char('e') => handle_edit(ui),
+                KeyCode::Char('t') => handle_edit_watch_field(ui, InputField::Target),
+                KeyCode::Char('x') => handle_edit_watch_field(ui, InputField::Extensions),
+                KeyCode::Char('b') => handle_edit_watch_field(ui, InputField::Debounce),
+                KeyCode::Char('p') => handle_edit_watch_field(ui, InputField::Template),
                 KeyCode::Char('+') | KeyCode::Char('-') => handle_size_adjust(ui, key.code),
                 _ => {}
             }
         }
     }
+}
+
+enum InputField {
+    Target,
+    Extensions,
+    Debounce,
+    Template,
+}
+
+fn handle_edit_watch_field(ui: &mut SettingsUi, field: InputField) {
+    if ui.active_tab != TabId::Watch || ui.config.watch.is_empty() {
+        return;
+    }
+    let idx = ui.selected_index;
+    if idx >= ui.config.watch.len() {
+        return;
+    }
+    ui.input_buffer.clear();
+    ui.message.clear();
+    ui.input_mode = match field {
+        InputField::Target => InputMode::EditingWatchTarget(idx),
+        InputField::Extensions => InputMode::EditingWatchExtensions(idx),
+        InputField::Debounce => InputMode::EditingWatchDebounce(idx),
+        InputField::Template => InputMode::EditingWatchTemplate(idx),
+    };
 }
 
 /// Handle keys in text input mode. Returns true if the key was consumed.
@@ -184,10 +271,10 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     match crate::config::validate_target_root(&path) {
                         Ok(()) => match ui.config.add_target(name, path) {
                             Ok(t) => {
-                                let lang = ui.config.language().to_string();
                                 ui.message =
-                                    format!("{} {}", tr("cli.added_target", &lang), t.name);
+                                    format!("{} {}", tr("cli.added_target", ui.lang()), t.name);
                                 ui.pending_save = true;
+                                ui.selected_index = ui.config.targets.len() - 1;
                             }
                             Err(e) => ui.message = format!("ERROR: {e:#}"),
                         },
@@ -211,7 +298,7 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                         extensions: None,
                         template: None,
                     });
-                    ui.message = "Added watch path (press 's' to save)".to_string();
+                    ui.selected_index = ui.config.watch.len() - 1;
                     ui.pending_save = true;
                     ui.input_mode = InputMode::Normal;
                     ui.input_buffer.clear();
@@ -223,7 +310,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     } else {
                         ui.config.targets[idx].obsidian_vault = Some(input.trim().to_string());
                     }
-                    ui.message = "Obsidian vault updated (press 's' to save)".to_string();
                     ui.pending_save = true;
                     ui.input_mode = InputMode::Normal;
                     ui.input_buffer.clear();
@@ -238,7 +324,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                         return true;
                     }
                     ui.config.watch[idx].path = path;
-                    ui.message = "Watch path updated (press 's' to save)".to_string();
                     ui.pending_save = true;
                     ui.input_mode = InputMode::Normal;
                     ui.input_buffer.clear();
@@ -251,7 +336,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     } else {
                         Some(trimmed)
                     };
-                    ui.message = "Watch target updated (press 's' to save)".to_string();
                     ui.pending_save = true;
                     ui.input_mode = InputMode::Normal;
                     ui.input_buffer.clear();
@@ -275,7 +359,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                             .collect();
                         ui.config.watch[idx].extensions = Some(StringList::Many(exts));
                     }
-                    ui.message = "Watch extensions updated (press 's' to save)".to_string();
                     ui.pending_save = true;
                     ui.input_mode = InputMode::Normal;
                     ui.input_buffer.clear();
@@ -285,7 +368,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     match input.trim().parse::<u64>() {
                         Ok(secs) if secs > 0 => {
                             ui.config.watch[idx].debounce_secs = secs;
-                            ui.message = "Watch debounce updated (press 's' to save)".to_string();
                         }
                         _ => {
                             ui.message = "Must be a positive number of seconds".to_string();
@@ -303,7 +385,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     } else {
                         Some(trimmed)
                     };
-                    ui.message = "Watch template updated (press 's' to save)".to_string();
                     ui.pending_save = true;
                     ui.input_mode = InputMode::Normal;
                     ui.input_buffer.clear();
@@ -325,7 +406,7 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
 }
 
 fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
-    let lang = ui.config.language();
+    let lang = ui.lang();
     let size = frame.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -336,11 +417,18 @@ fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         ])
         .split(size);
 
+    // Title with unsaved marker
+    let title_text = if ui.pending_save {
+        format!("{} {}", tr("tui.title", lang), tr("tui.unsaved", lang))
+    } else {
+        tr("tui.title", lang).to_string()
+    };
+
     // Tabs
-    let titles: Vec<Span> = TAB_TITLES.iter().map(|t| Span::raw(*t)).collect();
+    let titles = ui.tab_titles();
     let active_index = ui.active_tab as usize;
     let tabs = Tabs::new(titles)
-        .block(Block::default().borders(Borders::ALL).title("Tabs [1-4]"))
+        .block(Block::default().borders(Borders::ALL).title(title_text))
         .select(active_index)
         .style(Style::default())
         .highlight_style(Style::default().fg(Color::Yellow));
@@ -354,20 +442,27 @@ fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         TabId::Templates => render_templates(frame, ui, chunks[1]),
     }
 
-    // Footer
+    // Contextual footer
+    let help_key = match ui.active_tab {
+        TabId::Targets => "tui.help_targets",
+        TabId::Import => "tui.help_import",
+        TabId::Watch => "tui.help_watch",
+        TabId::Templates => "tui.help_templates",
+    };
     let footer_text = if ui.message.is_empty() {
-        tr("tui.footer", lang)
+        tr(help_key, lang).to_string()
     } else {
         format!("\u{26a0} {}", ui.message)
     };
-    let footer = Paragraph::new(Span::raw(&footer_text))
-        .block(Block::default().borders(Borders::ALL).title(" Help "));
+    let footer =
+        Paragraph::new(Span::raw(&footer_text)).block(Block::default().borders(Borders::ALL));
     frame.render_widget(footer, chunks[2]);
 }
 
 fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
+    let lang = ui.lang();
     let area = frame.area();
-    let overlay_area = ratatui::layout::Rect {
+    let overlay_area = Rect {
         x: area.x + 2,
         y: area.y + 2,
         width: area.width.saturating_sub(4).max(40),
@@ -380,48 +475,55 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
             "alphanumeric, '-', '_'".to_string(),
         ),
         InputMode::AddingTargetPath => ("Vault path: ".to_string(), String::new()),
-        InputMode::AddingWatchPath => ("Watch directory: ".to_string(), String::new()),
+        InputMode::AddingWatchPath => (
+            format!("{}: ", tr("tui.prompt_watch_path", lang)),
+            String::new(),
+        ),
         InputMode::EditingTargetVault(idx) => {
             let current = ui.config.targets[*idx]
                 .obsidian_vault
                 .as_deref()
-                .unwrap_or("(none)")
+                .unwrap_or("")
                 .to_string();
             (
-                format!("Obsidian vault for '{}': ", ui.config.targets[*idx].name),
-                current,
+                format!("{}: ", tr("tui.prompt_obsidian_vault", lang)),
+                if current.is_empty() {
+                    tr("tui.obsidian_hint", lang).to_string()
+                } else {
+                    current
+                },
             )
         }
         InputMode::EditingWatchPath(idx) => (
-            "Watch path: ".to_string(),
+            format!("{}: ", tr("tui.prompt_watch_path", lang)),
             ui.config.watch[*idx].path.display().to_string(),
         ),
         InputMode::EditingWatchTarget(idx) => (
-            "Watch target (empty=default): ".to_string(),
+            format!("{}: ", tr("tui.prompt_watch_target", lang)),
             ui.config.watch[*idx]
                 .target
                 .as_deref()
-                .unwrap_or("(default)")
+                .unwrap_or("")
                 .to_string(),
         ),
         InputMode::EditingWatchExtensions(idx) => (
-            "Extensions (comma-separated, empty=all): ".to_string(),
+            format!("{}: ", tr("tui.prompt_watch_extensions", lang)),
             ui.config.watch[*idx]
                 .extensions
                 .as_ref()
                 .map(|e| e.values().join(", "))
-                .unwrap_or_else(|| "(all)".to_string()),
+                .unwrap_or_default(),
         ),
         InputMode::EditingWatchDebounce(idx) => (
-            "Debounce seconds: ".to_string(),
+            format!("{}: ", tr("tui.prompt_watch_debounce", lang)),
             format!("{}s", ui.config.watch[*idx].debounce_secs),
         ),
         InputMode::EditingWatchTemplate(idx) => (
-            "Template (empty=none): ".to_string(),
+            format!("{}: ", tr("tui.prompt_watch_template", lang)),
             ui.config.watch[*idx]
                 .template
                 .as_deref()
-                .unwrap_or("(none)")
+                .unwrap_or("")
                 .to_string(),
         ),
         InputMode::Normal => (String::new(), String::new()),
@@ -465,11 +567,10 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
     frame.render_widget(paragraph, overlay_area);
 }
 
-fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layout::Rect) {
-    let lang = ui.config.language();
+fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
+    let lang = ui.lang();
     let header = Row::new(vec![
         Cell::from(tr("tui.default_col", lang)),
-        Cell::from(tr("tui.target_col", lang)),
         Cell::from(tr("tui.name_col", lang)),
         Cell::from(tr("tui.status_col", lang)),
         Cell::from(tr("tui.path_col", lang)),
@@ -488,14 +589,18 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::la
             } else {
                 ""
             };
-            Row::new(vec![
+            let row = Row::new(vec![
                 Cell::from(default_marker),
-                Cell::from(target.target_id.clone()),
                 Cell::from(target.name.clone()),
                 Cell::from(target.status.clone()),
                 Cell::from(target.root_path.display().to_string()),
-                Cell::from(target.obsidian_vault.as_deref().unwrap_or("(none)")),
-            ])
+                Cell::from(target.obsidian_vault.as_deref().unwrap_or("")),
+            ]);
+            if i == ui.selected_index {
+                row.style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            } else {
+                row
+            }
         })
         .collect();
 
@@ -503,7 +608,6 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::la
         rows,
         [
             Constraint::Length(2),
-            Constraint::Length(25),
             Constraint::Length(15),
             Constraint::Length(10),
             Constraint::Min(15),
@@ -514,44 +618,46 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::la
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(tr("tui.targets_title", lang)),
+            .title(tr("tui.tab_targets", lang)),
     );
     frame.render_widget(table, area);
 }
 
-fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layout::Rect) {
-    let lang = ui.config.language();
+fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
+    let lang = ui.lang();
+    let fm_status = if ui.config.import.inject_frontmatter {
+        "ON"
+    } else {
+        "OFF"
+    };
+    let lang_display = ui.config.import.language.as_deref().unwrap_or("en");
+    let lang_label = if lang_display == "zh-CN" {
+        "简体中文"
+    } else {
+        "English"
+    };
+
     let lines = vec![
         Line::from(vec![
             Span::styled(
-                tr("tui.max_file_size", lang),
+                format!("{} ", tr("tui.max_file_size", lang)),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::raw(format!(" {} MB", ui.config.import.max_file_size_mb)),
+            Span::raw(format!("{} MB", ui.config.import.max_file_size_mb)),
         ]),
         Line::from(vec![
             Span::styled(
-                tr("tui.frontmatter", lang),
+                format!("{} ", tr("tui.frontmatter", lang)),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::raw(format!(
-                " {}",
-                if ui.config.import.inject_frontmatter {
-                    "ON"
-                } else {
-                    "OFF"
-                }
-            )),
+            Span::raw(fm_status),
         ]),
         Line::from(vec![
             Span::styled(
-                tr("tui.language", lang),
+                format!("{} ", tr("tui.language", lang)),
                 Style::default().add_modifier(Modifier::BOLD),
             ),
-            Span::raw(format!(
-                " {}",
-                ui.config.import.language.as_deref().unwrap_or("en")
-            )),
+            Span::raw(lang_label),
         ]),
         Line::from(Span::default()),
         Line::from(vec![
@@ -574,18 +680,18 @@ fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::lay
     let para = Paragraph::new(lines).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(tr("tui.import_title", lang)),
+            .title(tr("tui.tab_import", lang)),
     );
     frame.render_widget(para, area);
 }
 
-fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layout::Rect) {
-    let lang = ui.config.language();
+fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
+    let lang = ui.lang();
     if ui.config.watch.is_empty() {
         let para = Paragraph::new(tr("tui.no_watch_configs", lang)).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(tr("tui.watch_title", lang)),
+                .title(tr("tui.tab_watch", lang)),
         );
         frame.render_widget(para, area);
         return;
@@ -604,8 +710,9 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layo
         .config
         .watch
         .iter()
-        .map(|w| {
-            Row::new(vec![
+        .enumerate()
+        .map(|(i, w)| {
+            let row = Row::new(vec![
                 Cell::from(w.path.display().to_string()),
                 Cell::from(w.target.as_deref().unwrap_or("(default)")),
                 Cell::from(w.template.as_deref().unwrap_or("(none)")),
@@ -616,7 +723,12 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layo
                         .unwrap_or_else(|| tr("tui.all_extensions", lang)),
                 ),
                 Cell::from(format!("{}s", w.debounce_secs)),
-            ])
+            ]);
+            if i == ui.selected_index {
+                row.style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            } else {
+                row
+            }
         })
         .collect();
 
@@ -634,18 +746,18 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layo
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(tr("tui.watch_title", lang)),
+            .title(tr("tui.tab_watch", lang)),
     );
     frame.render_widget(table, area);
 }
 
-fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layout::Rect) {
-    let lang = ui.config.language();
+fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
+    let lang = ui.lang();
     if ui.config.templates.is_empty() {
         let para = Paragraph::new(tr("tui.no_templates", lang)).block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(tr("tui.templates_title", lang)),
+                .title(tr("tui.tab_templates", lang)),
         );
         frame.render_widget(para, area);
         return;
@@ -686,7 +798,7 @@ fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .title(tr("tui.templates_title", lang)),
+            .title(tr("tui.tab_templates", lang)),
     );
     frame.render_widget(table, area);
 }
@@ -712,23 +824,28 @@ fn handle_add(ui: &mut SettingsUi) {
 
 fn handle_remove(ui: &mut SettingsUi) {
     if ui.active_tab == TabId::Targets {
-        if ui.config.targets.len() > 1 {
-            let removed = ui.config.targets.pop().unwrap();
-            let name = removed.name;
-            let lang = ui.config.language().to_string();
-            ui.message = format!("{} {}", tr("tui.removed", &lang), name);
-            ui.pending_save = true;
-        } else {
-            ui.message = tr("tui.cannot_remove_last", ui.config.language());
+        let idx = ui.selected_index;
+        if ui.config.targets.len() <= 1 {
+            ui.message = tr("tui.cannot_remove_last", ui.lang()).to_string();
+            return;
         }
+        let removed = ui.config.targets.remove(idx);
+        ui.message = format!("{} {}", tr("tui.removed", ui.lang()), removed.name);
+        ui.pending_save = true;
+        ui.clamp_selected();
     }
 }
 
 fn handle_default(ui: &mut SettingsUi) {
     if ui.active_tab == TabId::Targets && ui.config.targets.len() > 1 {
-        let second = ui.config.targets.remove(1);
-        ui.config.targets.insert(0, second);
-        ui.message = tr("tui.default_changed", ui.config.language());
+        let idx = ui.selected_index;
+        if idx == 0 {
+            return;
+        }
+        let target = ui.config.targets.remove(idx);
+        ui.config.targets.insert(0, target);
+        ui.selected_index = 0;
+        ui.message = tr("tui.default_changed", ui.lang()).to_string();
         ui.pending_save = true;
     }
 }
@@ -741,13 +858,15 @@ fn handle_toggle_frontmatter(ui: &mut SettingsUi) {
 }
 
 fn handle_toggle_language(ui: &mut SettingsUi) {
-    let current = ui.config.import.language.as_deref().unwrap_or("en");
-    ui.config.import.language = if current == "en" {
-        Some("zh-CN".to_string())
-    } else {
-        Some("en".to_string())
-    };
-    ui.pending_save = true;
+    if ui.active_tab == TabId::Import {
+        let current = ui.config.import.language.as_deref().unwrap_or("en");
+        ui.config.import.language = if current == "en" {
+            Some("zh-CN".to_string())
+        } else {
+            Some("en".to_string())
+        };
+        ui.pending_save = true;
+    }
 }
 
 fn handle_size_adjust(ui: &mut SettingsUi, code: KeyCode) {
@@ -763,50 +882,26 @@ fn handle_size_adjust(ui: &mut SettingsUi, code: KeyCode) {
     }
 }
 
-/// Edit the first item's editable fields. Cycles through available fields.
 fn handle_edit(ui: &mut SettingsUi) {
     match ui.active_tab {
         TabId::Targets if !ui.config.targets.is_empty() => {
-            ui.input_mode = InputMode::EditingTargetVault(0);
+            let idx = ui.selected_index;
+            if idx >= ui.config.targets.len() {
+                return;
+            }
+            ui.input_mode = InputMode::EditingTargetVault(idx);
             ui.input_buffer.clear();
             ui.message.clear();
         }
         TabId::Watch if !ui.config.watch.is_empty() => {
+            let idx = ui.selected_index;
+            if idx >= ui.config.watch.len() {
+                return;
+            }
+            ui.input_mode = InputMode::EditingWatchPath(idx);
             ui.input_buffer.clear();
             ui.message.clear();
-            ui.advance_watch_edit();
         }
         _ => {}
-    }
-}
-
-impl SettingsUi {
-    fn advance_watch_edit(&mut self) {
-        // Find current editing state, advance to next.
-        let current_field = self.current_watch_edit_field();
-        let next = match current_field {
-            0 => InputMode::EditingWatchPath(0),
-            1 => InputMode::EditingWatchTarget(0),
-            2 => InputMode::EditingWatchExtensions(0),
-            3 => InputMode::EditingWatchDebounce(0),
-            _ => InputMode::EditingWatchTemplate(0),
-        };
-        // If already on last field, wrap to first
-        if current_field == 4 {
-            self.input_mode = InputMode::EditingWatchPath(0);
-        } else {
-            self.input_mode = next;
-        }
-    }
-
-    fn current_watch_edit_field(&self) -> usize {
-        match &self.input_mode {
-            InputMode::EditingWatchPath(_) => 0,
-            InputMode::EditingWatchTarget(_) => 1,
-            InputMode::EditingWatchExtensions(_) => 2,
-            InputMode::EditingWatchDebounce(_) => 3,
-            InputMode::EditingWatchTemplate(_) => 4,
-            _ => 0,
-        }
     }
 }

@@ -129,6 +129,25 @@ fn en(key: &str) -> &'static str {
         "tui.default_changed" => "Default target updated.",
         "tui.vault_col" => "Vault",
 
+        // -- TUI tabs --
+        "tui.tab_targets" => "Targets",
+        "tui.tab_import" => "Import",
+        "tui.tab_watch" => "Watch",
+        "tui.tab_templates" => "Templates",
+        "tui.title" => "KBIntake Settings",
+        "tui.unsaved" => "(modified)",
+        "tui.help_targets" => "[↑↓] Select  [e] Edit Vault  [d] Set Default  [a] Add  [r] Remove  [s] Save  [q] Quit",
+        "tui.help_import" => "[+/-] Size  [f] Frontmatter  [l] Language  [s] Save  [q] Quit",
+        "tui.help_watch" => "[↑↓] Select  [e] Path  [t] Target  [x] Extensions  [b] Debounce  [p] Template  [a] Add  [s] Save  [q] Quit",
+        "tui.help_templates" => "(read-only)  [s] Save  [q] Quit",
+        "tui.prompt_obsidian_vault" => "Obsidian vault name (empty to clear)",
+        "tui.obsidian_hint" => "e.g. MyNotes",
+        "tui.prompt_watch_path" => "Watch directory path",
+        "tui.prompt_watch_target" => "Target name (empty = default)",
+        "tui.prompt_watch_extensions" => "Extensions (comma-separated, empty = all)",
+        "tui.prompt_watch_debounce" => "Debounce seconds",
+        "tui.prompt_watch_template" => "Template name (empty = none)",
+
         // -- Watcher --
         "watcher.duplicate" => "Another watcher instance is already running.",
         "toast.watch_import_ok_title" => "Watch Import OK",
@@ -310,6 +329,25 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "tui.cannot_remove_last" => Some("不能移除最后一个活跃目标。"),
         "tui.default_changed" => Some("默认目标已更新。"),
         "tui.vault_col" => Some("Vault"),
+
+        // -- TUI tabs --
+        "tui.tab_targets" => Some("目标"),
+        "tui.tab_import" => Some("导入设置"),
+        "tui.tab_watch" => Some("监控"),
+        "tui.tab_templates" => Some("模板"),
+        "tui.title" => Some("KBIntake 设置"),
+        "tui.unsaved" => Some("(未保存)"),
+        "tui.help_targets" => Some("[↑↓] 选择  [e] 编辑Vault  [d] 设为默认  [a] 添加  [r] 删除  [s] 保存  [q] 退出"),
+        "tui.help_import" => Some("[+/-] 大小  [f] Frontmatter  [l] 语言  [s] 保存  [q] 退出"),
+        "tui.help_watch" => Some("[↑↓] 选择  [e] 路径  [t] 目标  [x] 扩展名  [b] 防抖  [p] 模板  [a] 添加  [s] 保存  [q] 退出"),
+        "tui.help_templates" => Some("(只读)  [s] 保存  [q] 退出"),
+        "tui.prompt_obsidian_vault" => Some("Obsidian vault 名称（留空清除）"),
+        "tui.obsidian_hint" => Some("例如: MyNotes"),
+        "tui.prompt_watch_path" => Some("监控目录路径"),
+        "tui.prompt_watch_target" => Some("目标名称（空=默认）"),
+        "tui.prompt_watch_extensions" => Some("扩展名（逗号分隔，空=全部）"),
+        "tui.prompt_watch_debounce" => Some("防抖秒数"),
+        "tui.prompt_watch_template" => Some("模板名称（空=无）"),
 
         // -- Watcher --
         "watcher.duplicate" => Some("已有另一个监控实例在运行。"),
