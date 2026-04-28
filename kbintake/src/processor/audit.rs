@@ -36,6 +36,10 @@ pub struct AuditFixResult {
     pub deduplicated: usize,
 }
 
+fn normalize_path(path: &str) -> String {
+    path.replace('/', "\\")
+}
+
 pub fn audit_vault(target: &Target, repo: &Repository<'_>) -> Result<AuditReport> {
     let root = &target.root_path;
 
@@ -44,16 +48,16 @@ pub fn audit_vault(target: &Target, repo: &Repository<'_>) -> Result<AuditReport
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
-        .map(|e| e.path().to_string_lossy().to_string())
+        .map(|e| normalize_path(&e.path().to_string_lossy()))
         .collect();
 
     // Collect all manifest records for this target
     let manifest_entries = repo.list_manifests_by_target(&target.target_id)?;
 
-    // Build set of stored paths from manifest
+    // Build set of stored paths from manifest (normalized)
     let manifest_paths: HashSet<String> = manifest_entries
         .iter()
-        .map(|e| e.stored_path.clone())
+        .map(|e| normalize_path(&e.stored_path))
         .collect();
 
     // Orphan files: in vault but not in manifest
