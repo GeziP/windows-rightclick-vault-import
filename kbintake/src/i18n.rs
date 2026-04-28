@@ -88,7 +88,7 @@ fn en(key: &str) -> &'static str {
         // -- TUI --
         "tui.config_saved" => "Configuration saved.",
         "tui.exiting" => "Exiting settings TUI.",
-        "tui.footer" => "q: quit  s: save  a: add  r: remove  d: set default  f: toggle frontmatter  l: language  +/-: adjust size",
+        "tui.footer" => "q: quit  s: save  a: add  r: remove  d: set default  e: edit  f: toggle frontmatter  l: language  +/-: adjust size",
         "tui.targets_title" => " Targets [a: add, r: remove, d: set default] ",
         "tui.import_title" => " Import Settings [f: frontmatter, l: language, +/-: size] ",
         "tui.watch_title" => " Watch Configs ",
@@ -118,6 +118,7 @@ fn en(key: &str) -> &'static str {
         "tui.removed" => "Removed:",
         "tui.cannot_remove_last" => "Cannot remove the last active target.",
         "tui.default_changed" => "Default target updated.",
+        "tui.vault_col" => "Vault",
 
         // -- Watcher --
         "watcher.duplicate" => "Another watcher instance is already running.",
@@ -256,7 +257,7 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         // -- TUI --
         "tui.config_saved" => Some("配置已保存。"),
         "tui.exiting" => Some("退出设置界面。"),
-        "tui.footer" => Some("q: 退出  s: 保存  a: 添加  r: 移除  d: 设默认  f: 切换 frontmatter  l: 语言  +/-: 调整大小"),
+        "tui.footer" => Some("q: 退出  s: 保存  a: 添加  r: 移除  d: 设默认  e: 编辑  f: 切换 frontmatter  l: 语言  +/-: 调整大小"),
         "tui.targets_title" => Some(" 目标 [a: 添加, r: 移除, d: 设默认] "),
         "tui.import_title" => Some(" 导入设置 [f: frontmatter, l: 语言, +/-: 大小] "),
         "tui.watch_title" => Some(" 监控配置 "),
@@ -286,6 +287,7 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "tui.removed" => Some("已移除:"),
         "tui.cannot_remove_last" => Some("不能移除最后一个活跃目标。"),
         "tui.default_changed" => Some("默认目标已更新。"),
+        "tui.vault_col" => Some("Vault"),
 
         // -- Watcher --
         "watcher.duplicate" => Some("已有另一个监控实例在运行。"),

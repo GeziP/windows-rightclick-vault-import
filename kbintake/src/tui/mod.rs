@@ -16,7 +16,7 @@ use ratatui::{
     Terminal,
 };
 
-use crate::config::{AppConfig, WatchConfig};
+use crate::config::{AppConfig, StringList, WatchConfig};
 use crate::i18n::tr;
 
 /// Active tab in the TUI.
@@ -31,12 +31,18 @@ enum TabId {
 const TAB_TITLES: &[&str] = &["Targets", "Import", "Watch", "Templates"];
 
 /// Text input mode for the overlay.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum InputMode {
     Normal,
     AddingTargetName,
     AddingTargetPath,
     AddingWatchPath,
+    EditingTargetVault(usize),
+    EditingWatchPath(usize),
+    EditingWatchTarget(usize),
+    EditingWatchExtensions(usize),
+    EditingWatchDebounce(usize),
+    EditingWatchTemplate(usize),
 }
 
 /// Top-level TUI state.
@@ -135,6 +141,7 @@ fn run_loop(
                 KeyCode::Char('d') => handle_default(ui),
                 KeyCode::Char('f') => handle_toggle_frontmatter(ui),
                 KeyCode::Char('l') => handle_toggle_language(ui),
+                KeyCode::Char('e') => handle_edit(ui),
                 KeyCode::Char('+') | KeyCode::Char('-') => handle_size_adjust(ui, key.code),
                 _ => {}
             }
@@ -152,7 +159,7 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
         }
         KeyCode::Enter => {
             let input = std::mem::take(&mut ui.input_buffer);
-            match ui.input_mode {
+            match &ui.input_mode {
                 InputMode::AddingTargetName => {
                     let input_trimmed = input.trim().to_string();
                     if input_trimmed.is_empty() {
@@ -160,7 +167,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                         ui.input_mode = InputMode::Normal;
                         return true;
                     }
-                    // Validate characters.
                     if !input_trimmed
                         .chars()
                         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -169,7 +175,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                         ui.input_mode = InputMode::Normal;
                         return true;
                     }
-                    // Store name and move to path input.
                     ui.pending_target_name = Some(input_trimmed);
                     ui.input_buffer.clear();
                     ui.input_mode = InputMode::AddingTargetPath;
@@ -218,6 +223,94 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     ui.input_mode = InputMode::Normal;
                     ui.input_buffer.clear();
                 }
+                InputMode::EditingTargetVault(idx) => {
+                    let idx = *idx;
+                    if input.trim().is_empty() {
+                        ui.config.targets[idx].obsidian_vault = None;
+                    } else {
+                        ui.config.targets[idx].obsidian_vault = Some(input.trim().to_string());
+                    }
+                    ui.message = "Obsidian vault updated (press 's' to save)".to_string();
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::EditingWatchPath(idx) => {
+                    let idx = *idx;
+                    let path = PathBuf::from(&input);
+                    if !path.is_dir() {
+                        ui.message = format!("Directory does not exist: {}", path.display());
+                        ui.input_mode = InputMode::Normal;
+                        ui.input_buffer.clear();
+                        return true;
+                    }
+                    ui.config.watch[idx].path = path;
+                    ui.message = "Watch path updated (press 's' to save)".to_string();
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::EditingWatchTarget(idx) => {
+                    let idx = *idx;
+                    let trimmed = input.trim().to_string();
+                    ui.config.watch[idx].target = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    };
+                    ui.message = "Watch target updated (press 's' to save)".to_string();
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::EditingWatchExtensions(idx) => {
+                    let idx = *idx;
+                    let trimmed = input.trim().to_string();
+                    if trimmed.is_empty() {
+                        ui.config.watch[idx].extensions = None;
+                    } else {
+                        let exts: Vec<String> = trimmed
+                            .split(',')
+                            .map(|e| {
+                                let e = e.trim().to_string();
+                                if e.starts_with('.') { e } else { format!(".{e}") }
+                            })
+                            .collect();
+                        ui.config.watch[idx].extensions = Some(StringList::Many(exts));
+                    }
+                    ui.message = "Watch extensions updated (press 's' to save)".to_string();
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::EditingWatchDebounce(idx) => {
+                    let idx = *idx;
+                    match input.trim().parse::<u64>() {
+                        Ok(secs) if secs > 0 => {
+                            ui.config.watch[idx].debounce_secs = secs;
+                            ui.message = "Watch debounce updated (press 's' to save)".to_string();
+                        }
+                        _ => {
+                            ui.message = "Must be a positive number of seconds".to_string();
+                        }
+                    }
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::EditingWatchTemplate(idx) => {
+                    let idx = *idx;
+                    let trimmed = input.trim().to_string();
+                    ui.config.watch[idx].template = if trimmed.is_empty() {
+                        None
+                    } else {
+                        Some(trimmed)
+                    };
+                    ui.message = "Watch template updated (press 's' to save)".to_string();
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
                 InputMode::Normal => {}
             }
             true
@@ -230,7 +323,7 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
             ui.input_buffer.push(c);
             true
         }
-        _ => false, // Let other keys pass through.
+        _ => false,
     }
 }
 
@@ -290,22 +383,74 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         height: 7,
     };
 
-    let (prompt, step_hint) = match ui.input_mode {
-        InputMode::AddingTargetName => ("Target name: ", "alphanumeric, '-', '_'"),
-        InputMode::AddingTargetPath => ("Vault path: ", ""),
-        InputMode::AddingWatchPath => ("Watch directory: ", ""),
-        InputMode::Normal => ("", ""),
+    let (prompt, step_hint): (String, String) = match &ui.input_mode {
+        InputMode::AddingTargetName => (
+            "Target name: ".to_string(),
+            "alphanumeric, '-', '_'".to_string(),
+        ),
+        InputMode::AddingTargetPath => ("Vault path: ".to_string(), String::new()),
+        InputMode::AddingWatchPath => ("Watch directory: ".to_string(), String::new()),
+        InputMode::EditingTargetVault(idx) => {
+            let current = ui.config.targets[*idx]
+                .obsidian_vault
+                .as_deref()
+                .unwrap_or("(none)")
+                .to_string();
+            (
+                format!("Obsidian vault for '{}': ", ui.config.targets[*idx].name),
+                current,
+            )
+        }
+        InputMode::EditingWatchPath(idx) => (
+            "Watch path: ".to_string(),
+            ui.config.watch[*idx].path.display().to_string(),
+        ),
+        InputMode::EditingWatchTarget(idx) => (
+            "Watch target (empty=default): ".to_string(),
+            ui.config.watch[*idx]
+                .target
+                .as_deref()
+                .unwrap_or("(default)")
+                .to_string(),
+        ),
+        InputMode::EditingWatchExtensions(idx) => (
+            "Extensions (comma-separated, empty=all): ".to_string(),
+            ui.config.watch[*idx]
+                .extensions
+                .as_ref()
+                .map(|e| e.values().join(", "))
+                .unwrap_or_else(|| "(all)".to_string()),
+        ),
+        InputMode::EditingWatchDebounce(idx) => (
+            "Debounce seconds: ".to_string(),
+            format!("{}s", ui.config.watch[*idx].debounce_secs),
+        ),
+        InputMode::EditingWatchTemplate(idx) => (
+            "Template (empty=none): ".to_string(),
+            ui.config.watch[*idx]
+                .template
+                .as_deref()
+                .unwrap_or("(none)")
+                .to_string(),
+        ),
+        InputMode::Normal => (String::new(), String::new()),
     };
 
-    let title = match ui.input_mode {
+    let title = match &ui.input_mode {
         InputMode::AddingTargetName => " Add Target (1/2) ",
         InputMode::AddingTargetPath => " Add Target (2/2) ",
         InputMode::AddingWatchPath => " Add Watch Path ",
+        InputMode::EditingTargetVault(_) => " Edit Vault Name ",
+        InputMode::EditingWatchPath(_) => " Edit Watch Path ",
+        InputMode::EditingWatchTarget(_) => " Edit Watch Target ",
+        InputMode::EditingWatchExtensions(_) => " Edit Extensions ",
+        InputMode::EditingWatchDebounce(_) => " Edit Debounce ",
+        InputMode::EditingWatchTemplate(_) => " Edit Template ",
         InputMode::Normal => " Input ",
     };
 
     let mut lines = vec![
-        Line::from(Span::raw(format!("{prompt}{step_hint}"))),
+        Line::from(Span::raw(format!("{prompt}[{step_hint}]"))),
         Line::from(Span::styled(
             &ui.input_buffer,
             Style::default().fg(Color::Yellow),
@@ -337,6 +482,7 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::la
         Cell::from(tr("tui.name_col", lang)),
         Cell::from(tr("tui.status_col", lang)),
         Cell::from(tr("tui.path_col", lang)),
+        Cell::from(tr("tui.vault_col", lang)),
     ])
     .style(Style::default().fg(Color::Yellow));
 
@@ -357,6 +503,7 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::la
                 Cell::from(target.name.clone()),
                 Cell::from(target.status.clone()),
                 Cell::from(target.root_path.display().to_string()),
+                Cell::from(target.obsidian_vault.as_deref().unwrap_or("(none)")),
             ])
         })
         .collect();
@@ -365,10 +512,11 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::la
         rows,
         [
             Constraint::Length(2),
-            Constraint::Length(38),
+            Constraint::Length(25),
             Constraint::Length(15),
             Constraint::Length(10),
-            Constraint::Min(20),
+            Constraint::Min(15),
+            Constraint::Length(15),
         ],
     )
     .header(header)
@@ -454,7 +602,7 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layo
                 Cell::from(
                     w.extensions
                         .as_ref()
-                        .map(|e| format!("{e:?}"))
+                        .map(|e| e.values().join(", "))
                         .unwrap_or_else(|| tr("tui.all_extensions", lang)),
                 ),
                 Cell::from(format!("{}s", w.debounce_secs)),
@@ -465,10 +613,10 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layo
     let table = Table::new(
         rows,
         [
-            Constraint::Min(30),
+            Constraint::Min(20),
             Constraint::Length(15),
-            Constraint::Length(20),
-            Constraint::Length(20),
+            Constraint::Length(15),
+            Constraint::Length(15),
             Constraint::Length(10),
         ],
     )
@@ -606,5 +754,53 @@ fn handle_size_adjust(ui: &mut SettingsUi, code: KeyCode) {
             _ => {}
         }
         ui.pending_save = true;
+    }
+}
+
+/// Edit the first item's editable fields. Cycles through available fields.
+fn handle_edit(ui: &mut SettingsUi) {
+    match ui.active_tab {
+        TabId::Targets if !ui.config.targets.is_empty() => {
+            ui.input_mode = InputMode::EditingTargetVault(0);
+            ui.input_buffer.clear();
+            ui.message.clear();
+        }
+        TabId::Watch if !ui.config.watch.is_empty() => {
+            ui.input_buffer.clear();
+            ui.message.clear();
+            ui.advance_watch_edit();
+        }
+        _ => {}
+    }
+}
+
+impl SettingsUi {
+    fn advance_watch_edit(&mut self) {
+        // Find current editing state, advance to next.
+        let current_field = self.current_watch_edit_field();
+        let next = match current_field {
+            0 => InputMode::EditingWatchPath(0),
+            1 => InputMode::EditingWatchTarget(0),
+            2 => InputMode::EditingWatchExtensions(0),
+            3 => InputMode::EditingWatchDebounce(0),
+            _ => InputMode::EditingWatchTemplate(0),
+        };
+        // If already on last field, wrap to first
+        if current_field == 4 {
+            self.input_mode = InputMode::EditingWatchPath(0);
+        } else {
+            self.input_mode = next;
+        }
+    }
+
+    fn current_watch_edit_field(&self) -> usize {
+        match &self.input_mode {
+            InputMode::EditingWatchPath(_) => 0,
+            InputMode::EditingWatchTarget(_) => 1,
+            InputMode::EditingWatchExtensions(_) => 2,
+            InputMode::EditingWatchDebounce(_) => 3,
+            InputMode::EditingWatchTemplate(_) => 4,
+            _ => 0,
+        }
     }
 }
