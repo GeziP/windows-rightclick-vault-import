@@ -30,12 +30,16 @@ pub struct ImportConfig {
     pub inject_frontmatter: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    #[serde(default)]
+    pub auto_open_obsidian: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentConfig {
     #[serde(default = "default_poll_interval_secs")]
     pub poll_interval_secs: u64,
+    #[serde(default)]
+    pub watch_in_service: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -162,9 +166,11 @@ impl AppConfig {
                 max_file_size_mb: 512,
                 inject_frontmatter: true,
                 language: None,
+                auto_open_obsidian: false,
             },
             agent: AgentConfig {
                 poll_interval_secs: default_poll_interval_secs(),
+                watch_in_service: false,
             },
             routing: Vec::new(),
             templates: Vec::new(),

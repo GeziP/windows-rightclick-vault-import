@@ -1,4 +1,5 @@
 use std::io;
+use std::path::PathBuf;
 
 use anyhow::Result;
 use crossterm::{
@@ -11,11 +12,11 @@ use ratatui::{
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table, Tabs},
+    widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Tabs},
     Terminal,
 };
 
-use crate::config::AppConfig;
+use crate::config::{AppConfig, WatchConfig};
 use crate::i18n::tr;
 
 /// Active tab in the TUI.
@@ -29,12 +30,24 @@ enum TabId {
 
 const TAB_TITLES: &[&str] = &["Targets", "Import", "Watch", "Templates"];
 
+/// Text input mode for the overlay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputMode {
+    Normal,
+    AddingTargetName,
+    AddingTargetPath,
+    AddingWatchPath,
+}
+
 /// Top-level TUI state.
 struct SettingsUi {
     config: AppConfig,
     active_tab: TabId,
     message: String,
     pending_save: bool,
+    input_mode: InputMode,
+    input_buffer: String,
+    pending_target_name: Option<String>,
 }
 
 impl SettingsUi {
@@ -44,6 +57,9 @@ impl SettingsUi {
             active_tab: TabId::Targets,
             message: String::new(),
             pending_save: false,
+            input_mode: InputMode::Normal,
+            input_buffer: String::new(),
+            pending_target_name: None,
         }
     }
 
@@ -82,12 +98,25 @@ fn run_loop(
     ui: &mut SettingsUi,
 ) -> Result<()> {
     loop {
-        terminal.draw(|frame| render(frame, ui))?;
+        terminal.draw(|frame| {
+            render(frame, ui);
+            if ui.input_mode != InputMode::Normal {
+                render_input_overlay(frame, ui);
+            }
+        })?;
 
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
                 continue;
             }
+
+            // Handle text input mode first.
+            if ui.input_mode != InputMode::Normal
+                && handle_text_input(ui, key.code)
+            {
+                continue;
+            }
+
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                 KeyCode::Char('1') => ui.active_tab = TabId::Targets,
@@ -110,6 +139,98 @@ fn run_loop(
                 _ => {}
             }
         }
+    }
+}
+
+/// Handle keys in text input mode. Returns true if the key was consumed.
+fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
+    match code {
+        KeyCode::Esc => {
+            ui.input_mode = InputMode::Normal;
+            ui.input_buffer.clear();
+            true
+        }
+        KeyCode::Enter => {
+            let input = std::mem::take(&mut ui.input_buffer);
+            match ui.input_mode {
+                InputMode::AddingTargetName => {
+                    let input_trimmed = input.trim().to_string();
+                    if input_trimmed.is_empty() {
+                        ui.message = "Name cannot be empty".to_string();
+                        ui.input_mode = InputMode::Normal;
+                        return true;
+                    }
+                    // Validate characters.
+                    if !input_trimmed
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                    {
+                        ui.message = "Name: only letters, numbers, '-', '_' allowed".to_string();
+                        ui.input_mode = InputMode::Normal;
+                        return true;
+                    }
+                    // Store name and move to path input.
+                    ui.pending_target_name = Some(input_trimmed);
+                    ui.input_buffer.clear();
+                    ui.input_mode = InputMode::AddingTargetPath;
+                    ui.message.clear();
+                }
+                InputMode::AddingTargetPath => {
+                    let path = PathBuf::from(&input);
+                    let name = ui.pending_target_name.take().unwrap_or_default();
+                    match crate::config::validate_target_root(&path) {
+                        Ok(()) => {
+                            match ui.config.add_target(name, path) {
+                                Ok(t) => {
+                                    let lang = ui.config.language().to_string();
+                                    ui.message = format!(
+                                        "{} {}",
+                                        tr("cli.added_target", &lang),
+                                        t.name
+                                    );
+                                    ui.pending_save = true;
+                                }
+                                Err(e) => ui.message = format!("ERROR: {e:#}"),
+                            }
+                        }
+                        Err(e) => ui.message = format!("Invalid path: {e:#}"),
+                    }
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::AddingWatchPath => {
+                    let path = PathBuf::from(&input);
+                    if !path.is_dir() {
+                        ui.message = format!("Directory does not exist: {}", path.display());
+                        ui.input_mode = InputMode::Normal;
+                        ui.input_buffer.clear();
+                        return true;
+                    }
+                    ui.config.watch.push(WatchConfig {
+                        path,
+                        target: None,
+                        debounce_secs: 2,
+                        extensions: None,
+                        template: None,
+                    });
+                    ui.message = "Added watch path (press 's' to save)".to_string();
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::Normal => {}
+            }
+            true
+        }
+        KeyCode::Backspace => {
+            ui.input_buffer.pop();
+            true
+        }
+        KeyCode::Char(c) => {
+            ui.input_buffer.push(c);
+            true
+        }
+        _ => false, // Let other keys pass through.
     }
 }
 
@@ -158,6 +279,54 @@ fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
             .title(" Help "),
     );
     frame.render_widget(footer, chunks[2]);
+}
+
+fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
+    let area = frame.area();
+    let overlay_area = ratatui::layout::Rect {
+        x: area.x + 2,
+        y: area.y + 2,
+        width: area.width.saturating_sub(4).max(40),
+        height: 7,
+    };
+
+    let (prompt, step_hint) = match ui.input_mode {
+        InputMode::AddingTargetName => ("Target name: ", "alphanumeric, '-', '_'"),
+        InputMode::AddingTargetPath => ("Vault path: ", ""),
+        InputMode::AddingWatchPath => ("Watch directory: ", ""),
+        InputMode::Normal => ("", ""),
+    };
+
+    let title = match ui.input_mode {
+        InputMode::AddingTargetName => " Add Target (1/2) ",
+        InputMode::AddingTargetPath => " Add Target (2/2) ",
+        InputMode::AddingWatchPath => " Add Watch Path ",
+        InputMode::Normal => " Input ",
+    };
+
+    let mut lines = vec![
+        Line::from(Span::raw(format!("{prompt}{step_hint}"))),
+        Line::from(Span::styled(
+            &ui.input_buffer,
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "[Enter] confirm  [Esc] cancel  [Backspace] delete",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    if let InputMode::AddingTargetPath = ui.input_mode {
+        if let Some(ref name) = ui.pending_target_name {
+            lines.insert(1, Line::from(Span::raw(format!("Name: {name}"))));
+        }
+    }
+
+    let block = Block::default().borders(Borders::ALL).title(title);
+    let paragraph = Paragraph::new(lines).block(block);
+
+    frame.render_widget(Clear, overlay_area);
+    frame.render_widget(paragraph, overlay_area);
 }
 
 fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::layout::Rect) {
@@ -367,9 +536,19 @@ fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: ratatui::
 // --- Action handlers ---
 
 fn handle_add(ui: &mut SettingsUi) {
-    if ui.active_tab == TabId::Targets {
-        ui.message = tr("tui.add_target_hint", ui.config.language());
-        ui.pending_save = true;
+    match ui.active_tab {
+        TabId::Targets => {
+            ui.input_mode = InputMode::AddingTargetName;
+            ui.input_buffer.clear();
+            ui.pending_target_name = None;
+            ui.message.clear();
+        }
+        TabId::Watch => {
+            ui.input_mode = InputMode::AddingWatchPath;
+            ui.input_buffer.clear();
+            ui.message.clear();
+        }
+        _ => {}
     }
 }
 

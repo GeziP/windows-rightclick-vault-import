@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -78,7 +79,14 @@ impl DebounceTracker {
 ///
 /// This is a long-running operation. Pass `watch_paths` to watch specific
 /// directories (CLI override), or `None` to use the `[[watch]]` config entries.
-pub fn run_watcher(app: &App, watch_paths: Option<Vec<PathBuf>>) -> Result<()> {
+///
+/// The `shutdown_flag` is checked each poll cycle; when set to `true`, the watcher
+/// exits cleanly.
+pub fn run_watcher(
+    app: &App,
+    watch_paths: Option<Vec<PathBuf>>,
+    shutdown_flag: Arc<AtomicBool>,
+) -> Result<()> {
     let lang = app.config.language();
     let lock_path = app.config.app_data_dir.join("kbintake-watch.pid");
 
@@ -136,6 +144,12 @@ pub fn run_watcher(app: &App, watch_paths: Option<Vec<PathBuf>>) -> Result<()> {
 
     // Main event loop — process events and check for stable files every 200ms.
     loop {
+        // Check for shutdown signal.
+        if shutdown_flag.load(Ordering::SeqCst) {
+            info!("watcher received shutdown signal");
+            break;
+        }
+
         // Non-blocking collect of recent events.
         while let Ok(result) = rx.try_recv() {
             match result {
@@ -178,8 +192,14 @@ pub fn run_watcher(app: &App, watch_paths: Option<Vec<PathBuf>>) -> Result<()> {
             }
         }
 
+        // Sleep with shutdown check.
+        if shutdown_flag.load(Ordering::SeqCst) {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(200));
     }
+
+    Ok(())
 }
 
 fn handle_event(

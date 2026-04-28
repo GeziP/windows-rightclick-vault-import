@@ -611,7 +611,7 @@ fn import_process_drains_new_work_end_to_end() {
     let source = temp.path().join("process-note.md");
     fs::write(&source, "process me").unwrap();
 
-    handle_import_command(&app, None, None, true, false, false, vec![source]).unwrap();
+    handle_import_command(&app, None, None, true, false, false, false, vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -638,7 +638,7 @@ fn import_without_process_leaves_work_queued() {
     let source = temp.path().join("queued-note.md");
     fs::write(&source, "queue me").unwrap();
 
-    handle_import_command(&app, None, None, false, false, false, vec![source]).unwrap();
+    handle_import_command(&app, None, None, false, false, false, false, vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -658,7 +658,7 @@ fn import_process_failure_before_enqueue_does_not_drain_existing_queue() {
     fs::write(&existing, "still queued").unwrap();
     handle_import(&app, None, None, vec![existing]).unwrap();
 
-    let err = handle_import_command(&app, None, None, true, false, false, vec![missing]).unwrap_err();
+    let err = handle_import_command(&app, None, None, true, false, false, false, vec![missing]).unwrap_err();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);

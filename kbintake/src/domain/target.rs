@@ -9,6 +9,8 @@ pub struct Target {
     pub root_path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_subfolder: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub obsidian_vault: Option<String>,
     #[serde(default = "default_target_status")]
     pub status: String,
 }
@@ -21,6 +23,7 @@ impl Target {
             name,
             root_path,
             default_subfolder: None,
+            obsidian_vault: None,
             status: TARGET_STATUS_ACTIVE.to_string(),
         }
     }

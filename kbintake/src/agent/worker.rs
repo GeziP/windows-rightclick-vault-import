@@ -274,6 +274,22 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
     )?;
 
     info!(item_id = %item.item_id, stored_path = %record.stored_path, "item imported");
+
+    // Auto-open in Obsidian if configured and target has a vault name.
+    if app.config.import.auto_open_obsidian
+        && frontmatter::is_markdown_extension(item.file_ext.as_deref())
+    {
+        if let (Some(vault), Ok(rel)) = (
+            target.obsidian_vault.as_ref(),
+            dest.strip_prefix(&target.root_path),
+        ) {
+            let obsidian_path = rel.to_string_lossy().replace('\\', "/");
+            if let Err(e) = crate::obsidian::open_note(vault, &obsidian_path) {
+                warn!(item_id = %item.item_id, error = %e, "failed to auto-open note in Obsidian");
+            }
+        }
+    }
+
     Ok(())
 }
 

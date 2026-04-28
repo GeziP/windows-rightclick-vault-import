@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -40,6 +42,8 @@ pub enum Commands {
         dry_run: bool,
         #[arg(long)]
         json: bool,
+        #[arg(long, help = "Open imported notes in Obsidian after import")]
+        open: bool,
         paths: Vec<PathBuf>,
     },
     Jobs {
@@ -259,6 +263,7 @@ pub enum RoutingSummary {
     Multiple,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_import_command(
     app: &App,
     target_id: Option<String>,
@@ -266,6 +271,7 @@ pub fn handle_import_command(
     process: bool,
     dry_run: bool,
     json: bool,
+    open: bool,
     paths: Vec<PathBuf>,
 ) -> Result<i32> {
     if dry_run {
@@ -282,6 +288,9 @@ pub fn handle_import_command(
     let outcome = handle_import(app, target_id, template, paths)?;
     if process {
         scheduler::drain_queue(app)?;
+        if open {
+            open_successful_notes_in_obsidian(app, &outcome.batch_id)?;
+        }
         return import_exit_code(app, &outcome.batch_id);
     }
     Ok(exit_codes::SUCCESS)
@@ -1142,6 +1151,36 @@ fn import_exit_code(app: &App, batch_id: &str) -> Result<i32> {
     Ok(exit_codes::GENERAL_ERROR)
 }
 
+/// Open successfully imported markdown notes in Obsidian for the given batch.
+fn open_successful_notes_in_obsidian(app: &App, batch_id: &str) -> Result<()> {
+    use crate::processor::frontmatter;
+
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+    let items = repo.list_items_by_batch(batch_id)?;
+
+    for item in items {
+        if item.status != crate::queue::state_machine::STATUS_SUCCESS {
+            continue;
+        }
+        let Some(stored_path) = &item.stored_path else { continue };
+        let Ok(target) = app.config.target_by_id(&item.target_id) else { continue };
+        let Some(ref vault) = target.obsidian_vault else { continue };
+        if !frontmatter::is_markdown_extension(item.file_ext.as_deref()) {
+            continue;
+        }
+
+        let dest = std::path::Path::new(stored_path);
+        if let Ok(rel) = dest.strip_prefix(&target.root_path) {
+            let obsidian_path = rel.to_string_lossy().replace('\\', "/");
+            if let Err(e) = crate::obsidian::open_note(vault, &obsidian_path) {
+                tracing::warn!(item_id = %item.item_id, error = %e, "failed to open note in Obsidian");
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
     match command {
         ExplorerCommands::Install {
@@ -1449,7 +1488,9 @@ fn format_timestamp(value: &str) -> String {
 /// Start the file watcher for the given paths (or config defaults).
 /// This is a long-running operation that does not return.
 pub fn handle_watch(app: &App, paths: Option<Vec<PathBuf>>) -> Result<i32> {
-    crate::agent::watcher::run_watcher(app, paths)
+    // CLI watch mode runs until Ctrl-C; never shuts down via flag.
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    crate::agent::watcher::run_watcher(app, paths, shutdown_flag)
         .map(|()| exit_codes::SUCCESS)
 }
 
@@ -1496,9 +1537,11 @@ mod tests {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
                     language: None,
+                    auto_open_obsidian: false,
                 },
                 agent: AgentConfig {
                     poll_interval_secs: 5,
+                    watch_in_service: false,
                 },
                 routing: Vec::new(),
                 templates: Vec::new(),
@@ -1937,7 +1980,7 @@ mod tests {
         fs::write(&large, "too large").unwrap();
 
         let code =
-            handle_import_command(&app, None, None, true, false, false, vec![empty, large]).unwrap();
+            handle_import_command(&app, None, None, true, false, false, false, vec![empty, large]).unwrap();
 
         assert_eq!(code, exit_codes::PARTIAL_SUCCESS);
     }
@@ -1950,7 +1993,7 @@ mod tests {
         let large = temp.path().join("large.md");
         fs::write(&large, "too large").unwrap();
 
-        let code = handle_import_command(&app, None, None, true, false, false, vec![large]).unwrap();
+        let code = handle_import_command(&app, None, None, true, false, false, false, vec![large]).unwrap();
 
         assert_eq!(code, exit_codes::FILE_SIZE_EXCEEDED);
     }
