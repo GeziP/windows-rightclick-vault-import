@@ -1,6 +1,6 @@
 # KBIntake v2.0 Issue Map
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 ## Purpose
 
@@ -26,17 +26,22 @@ Do not continue v2.0 implementation from local momentum alone. Before each new s
 
 ### Core v2 epics
 
-- `#57` Windows 11 native context menu
-- `#58` Import template system
-- `#59` Target `default_subfolder`
-- `#60` TUI settings
-- `#61` zh-CN localization
-- `#62` Watch Mode
-- `#63` Obsidian URI integration
-- `#64` Quick tag injection
-- `#65` Vault audit
-- `#66` Clipboard import and release prep
-- `#67` Documentation tracker
+- `#57` Windows 11 native context menu (open — go/no-go pending)
+- `#58` Import template system (closed)
+- `#59` Target `default_subfolder` (closed)
+- `#60` TUI settings (closed)
+- `#61` zh-CN localization (closed)
+- `#62` Watch Mode (closed)
+- `#63` Obsidian URI integration (closed)
+- `#64` Quick tag injection (closed)
+- `#65` Vault audit (closed)
+- `#66` Clipboard import and release prep (closed)
+- `#67` Documentation tracker (open)
+
+### Post-handoff epics
+
+- `#76` System tray icon (closed)
+- `#77` Watch Mode directory structure preservation (closed)
 
 ## Known Issue Number Conflicts
 
@@ -101,6 +106,35 @@ Implemented:
 Still open for `#62`:
 
 (None)
+
+### Post-handoff additions
+
+Implemented after initial v2.0 handoff:
+
+- **System tray icon** (`kbintakew.exe tray`): Windows Shell_NotifyIconW with right-click context menu
+  - Menu items: Settings (launches TUI via ShellExecuteW), Auto-start toggle, Exit
+  - `src/tray/mod.rs`: hidden window + message loop + WndProc
+  - `src/tray/autostart.rs`: HKCU\Run registry read/write/delete
+  - File-based logging to `%LOCALAPPDATA%\kbintake\logs\`
+- **Watch Mode directory structure preservation**:
+  - DB migration 006: `items.import_subfolder TEXT` column
+  - Watcher computes relative path from watch root and sets `import_subfolder` on item
+  - Worker uses `import_subfolder` to build destination under target root, preserving directory tree
+  - Files imported with original name (no suffix conflict resolution when subfolder is set)
+  - `LocalFolderAdapter::store_copy_to()` for exact-path copy with auto-mkdir
+- **Stale manifest re-import**:
+  - Dedup check now returns `(record_id, stored_path)` tuple
+  - Worker verifies `stored_path` exists before marking duplicate
+  - If file was deleted from vault: removes stale manifest record and re-imports
+- **Watch startup scan**:
+  - `scan_existing_files()` walks watch directories on watcher startup
+  - Hashes each file, checks manifest for existing import by target+hash
+  - Skips files where vault copy exists; imports files not yet tracked
+  - Handles re-import when vault copy was deleted but manifest record remains
+- **File-based logging for background modes**:
+  - `logging::init_service_logging()` writes to `%LOCALAPPDATA%\kbintake\logs\kbintake-YYYY-MM-DD.log`
+  - Enabled for tray and service run commands
+- **Schema version**: bumped from 5 to 6
 
 ### Phase 1 / Epic `#60` TUI settings
 
@@ -253,7 +287,7 @@ Before coding:
 
 ## Recommended Next Slice
 
-All planned v2.0 features implemented. Remaining:
+All planned v2.0 features implemented including post-handoff additions (tray, directory preservation). Remaining:
 
 - Real Windows 11 validation of the `kbintake-com` DLL on a physical machine (`#57`)
 - Documentation pass (`#67`)

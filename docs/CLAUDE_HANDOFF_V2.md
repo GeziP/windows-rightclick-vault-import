@@ -1,6 +1,6 @@
 # KBIntake v2.0 Handoff Notes
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 ## Purpose
 
@@ -17,7 +17,7 @@ Use this together with:
 
 - active branch: `v2.0`
 - working tree status at handoff: clean
-- all Phase 1–3 features implemented
+- all Phase 1–3 features implemented, plus post-handoff additions
 
 Recent v2 commits on this branch:
 
@@ -113,18 +113,55 @@ For v2.0 work, use:
 - `--clipboard` CLI flag reads file paths from Windows clipboard
 - Win32 `DataExchange` API
 
+### Post-handoff additions
+
+#### System tray icon (`src/tray/`)
+
+- `kbintakew.exe tray` — Shell_NotifyIconW with right-click context menu
+- Menu items: Settings (launches TUI via ShellExecuteW), Auto-start toggle, Exit
+- `src/tray/mod.rs`: hidden window + WndProc message loop
+- `src/tray/autostart.rs`: HKCU\Run registry read/write/delete for login persistence
+- File-based logging: `logging::init_service_logging()` → `%LOCALAPPDATA%\kbintake\logs\`
+
+#### Watch Mode directory structure preservation
+
+- DB migration 006: `items.import_subfolder TEXT` column
+- `src/domain/item.rs`: `ItemJob.import_subfolder: Option<String>`
+- `src/agent/watcher.rs`: `process_stable_file()` computes relative path from watch root
+- `src/agent/worker.rs`: uses `import_subfolder` to build destination preserving directory tree
+- `src/adapter/local_folder.rs`: `store_copy_to()` for exact-path copy with auto-mkdir
+- Files imported with original name (no suffix conflict resolution)
+
+#### Stale manifest re-import
+
+- `src/processor/deduper.rs`: `find_duplicate_record()` returns `(record_id, stored_path)`
+- Worker verifies stored file exists before marking duplicate
+- If file deleted from vault: removes stale manifest record, re-imports
+
+#### Watch startup scan
+
+- `src/agent/watcher.rs`: `scan_existing_files()` walks watch directories on startup
+- Hashes each file, checks manifest for existing import by target+hash
+- Verifies stored_path existence before skipping
+
+#### Schema changes
+
+- Migration 006: `ALTER TABLE items ADD COLUMN import_subfolder TEXT`
+- `LATEST_SCHEMA_VERSION` = 6
+
 ## Recommended Next Step
 
-All planned v2.0 features are implemented. Next steps:
+All planned v2.0 features plus post-handoff additions are implemented. Next steps:
 
 1. **Documentation pass** (`#67`): template gallery, config reference, CONTRIBUTING
 2. **Windows 11 COM DLL go/no-go**: decide if it ships in v2.0 or v2.1
 3. **Release preparation** (`#56`): version bump, installer update, winget manifest, release notes
+4. **Installer tray integration**: add tray auto-start option to NSIS installer
 
 ## Validation State At Handoff
 
 ```powershell
-cargo test --locked                            # 169 tests (117 unit + 52 integration)
+cargo test --locked                            # 170 tests (118 unit + 52 integration)
 cargo clippy --all-targets --all-features -- -D warnings  # clean
 cargo fmt --all -- --check                     # clean
 cargo build --release --locked --bins          # kbintake + kbintake-com
@@ -141,7 +178,9 @@ cargo build --release --locked --bins          # kbintake + kbintake-com
 - `kbintake/src/processor/audit.rs` — vault audit logic
 - `kbintake/src/processor/template.rs` — template rendering with CLI tags merge
 - `kbintake/src/clipboard.rs` — Windows clipboard reader
-- `kbintake/src/agent/watcher.rs` — Watch Mode with PID lock + toast
+- `kbintake/src/agent/watcher.rs` — Watch Mode with PID lock, startup scan, directory preservation
+- `kbintake/src/tray/mod.rs` — System tray icon with right-click menu
+- `kbintake/src/tray/autostart.rs` — HKCU\Run auto-start management
 - `kbintake/src/i18n.rs` — en/zh-CN translation dictionaries
 - `kbintake/src/tui/mod.rs` — interactive TUI settings
 - `kbintake/src/obsidian.rs` — Obsidian URI integration

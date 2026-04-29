@@ -68,10 +68,11 @@ Core v2 epics:
 - `vault audit`
 - installer option for service/watch setup
 - Windows 11 native Explorer command if the feasibility gate passes
+- system tray management UI (implemented post-handoff: `kbintakew.exe tray`)
+- watch directory structure preservation (implemented: migration 006)
 
 ### Can Slip To v2.1
 
-- system tray management UI
 - rich Windows toast action buttons
 - automatic community template gallery integration
 - advanced nested template inheritance
@@ -179,7 +180,15 @@ Tasks:
   - template and target binding
   - locked-file retry
   - duplicate watcher detection
+  - directory structure preservation (migration 006, `import_subfolder`)
+  - startup scan for existing files in watch directories
+  - stale manifest detection with automatic re-import
 - integrate Watch Mode with service mode where practical
+- implement system tray icon:
+  - `kbintakew.exe tray` with Shell_NotifyIconW
+  - right-click context menu (Settings, Auto-start, Exit)
+  - HKCU\Run auto-start management
+  - file-based logging for background modes
 
 Exit criteria:
 

@@ -42,6 +42,17 @@ Remaining for v2.0 release:
 - Installer update and version bump
 - Winget manifest for `2.0.0`
 
+## Post-handoff Additions
+
+| Feature | Description |
+|---------|-------------|
+| System tray icon | `kbintakew.exe tray` with right-click menu (Settings, Auto-start, Exit) |
+| Auto-start management | Toggle HKCU\Run registry entry from tray menu |
+| Watch directory preservation | Files imported with original names into matching subdirectories (migration 006) |
+| Stale manifest re-import | Dedup checks stored file existence; deleted vault files auto re-imported |
+| Watch startup scan | Existing files in watch directories imported on watcher start |
+| File-based logging | Tray and service modes log to `%LOCALAPPDATA%\kbintake\logs\` |
+
 ## Completed Milestones
 
 ### Foundation
@@ -86,6 +97,10 @@ Remaining for v2.0 release:
 - zh-CN localization
 - Obsidian URI integration with auto-open
 - Watch Mode with debounce, extension filter, and template binding
+- Watch Mode directory structure preservation (files keep original names and subdirectory paths)
+- System tray icon with right-click context menu (Settings, Auto-start, Exit)
+- Auto-start management via HKCU\Run registry
+- File-based logging for tray and service modes
 
 ### Explorer And Notifications
 
@@ -121,7 +136,7 @@ Remaining for v2.0 release:
 - Documentation pass (template gallery, config reference, CONTRIBUTING)
 - winget publication through `winget install GeziP.KBIntake` after PR merge
 - Authenticode code signing
-- installer option to install/start the Windows Service
+- installer option to install/start the Windows Service and tray
 - reboot-resume validation for service mode
 
 ## Known Limitations

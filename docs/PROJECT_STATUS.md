@@ -1,10 +1,10 @@
 # KBIntake Project Status
 
-Last updated: 2026-04-28
+Last updated: 2026-04-29
 
 ## Summary
 
-KBIntake v2.0 is in final development on branch `v2.0`. All planned features across Phase 1–3 are implemented. Remaining work is documentation, physical machine validation of the Windows 11 COM DLL, and release preparation.
+KBIntake v2.0 is in final development on branch `v2.0`. All planned features across Phase 1–3 are implemented, plus post-handoff additions (system tray, directory structure preservation, stale manifest handling). Remaining work is documentation, physical machine validation of the Windows 11 COM DLL, and release preparation.
 
 The current stable release remains `v1.0.0`:
 
@@ -18,7 +18,7 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
 
 - Rust CLI and Windows GUI-subsystem companion binary
 - local config bootstrap under `%LOCALAPPDATA%\kbintake`
-- SQLite schema migrations through schema version 5
+- SQLite schema migrations through schema version 6
 - import queue, items, manifests, and events
 - file scanning for files and directories
 - validation, size limit checks, SHA-256 hashing
@@ -86,6 +86,9 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
 - Debounce, extension filter, template binding per watch config
 - Locked-file retry with backoff
 - Windows Service integration via `agent.watch_in_service`
+- Directory structure preservation: files imported into matching subdirectories with original names
+- Startup scan: imports existing files not yet tracked in manifest
+- Stale manifest detection: re-imports when vault file was deleted
 
 #### Epic #63: Obsidian URI Integration
 
@@ -122,10 +125,26 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
 - GHA validation workflow for registry operations
 - Validated on Windows 11 physical hardware
 
+#### Post-handoff Additions (no epic number)
+
+- **System Tray Icon** (`kbintakew.exe tray`):
+  - Shell_NotifyIconW with right-click context menu (Settings, Auto-start, Exit)
+  - `src/tray/mod.rs`: hidden window + message loop + WndProc
+  - `src/tray/autostart.rs`: HKCU\Run registry management for login persistence
+  - Settings launches TUI via ShellExecuteW (avoids antivirus alerts)
+  - File-based logging to `%LOCALAPPDATA%\kbintake\logs\`
+- **Watch Directory Structure Preservation**:
+  - DB migration 006: `items.import_subfolder` column
+  - Files imported with original names into matching subdirectories
+  - `LocalFolderAdapter::store_copy_to()` for exact-path copy
+- **Stale Manifest Handling**:
+  - Dedup verifies stored file still exists before marking duplicate
+  - Deleted vault files trigger automatic re-import
+
 ## Validation State
 
 ```powershell
-cargo test --locked                            # 169 tests (117 unit + 52 integration)
+cargo test --locked                            # 170 tests (118 unit + 52 integration)
 cargo clippy --all-targets --all-features -- -D warnings  # clean
 cargo fmt --all -- --check                     # clean
 cargo build --release --locked --bins          # kbintake + kbintake-com

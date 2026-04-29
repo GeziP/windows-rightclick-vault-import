@@ -275,6 +275,18 @@ Rules are evaluated in order. First match wins. If no `target` is specified, fal
 
 Watch Mode monitors directories for new files and imports them automatically.
 
+### Directory Structure Preservation
+
+When files are imported via Watch Mode, the original directory structure is preserved. Files are placed into matching subdirectories under the vault root with their original filenames (no renaming or conflict resolution suffixes).
+
+For example, if watching `E:\watch` and a file appears at `E:\watch\project\notes.md`, it will be imported to `vault/project/notes.md`.
+
+This behavior only applies to Watch Mode. CLI imports use template subfolder and conflict-safe naming as before.
+
+### Startup Scan
+
+When the watcher starts, it scans all configured watch directories for existing files. Files not yet in the vault (or whose vault copy was deleted) are imported automatically.
+
 Fields:
 
 - `path`: directory to watch (required)

@@ -35,13 +35,27 @@ Major release adding template-based imports, Watch Mode, TUI settings, localizat
 - Dry-run output now shows target, matched routing rule, template destination, and frontmatter preview
 - Explorer import toast text includes routing rule context
 - Explorer right-click menu upgraded from single action to cascading submenu (Import / Queue / Settings)
-- SQLite schema version bumped to 5
+- SQLite schema version bumped to 6
 - `windows` crate dependency updated with `Win32_System_DataExchange` feature for clipboard support
+- Dedup check now verifies stored file exists; deleted vault files trigger automatic re-import instead of false duplicate skip
+- Watch Mode startup scan imports existing files not yet in vault, with hash-based dedup
+
+### Added (post-handoff)
+
+- System tray icon (`kbintakew.exe tray`): Shell_NotifyIconW icon with right-click context menu (Settings, Auto-start, Exit)
+- Tray auto-start management: toggle HKCU\Run registry entry for login persistence
+- Tray settings launches TUI via ShellExecuteW (avoids antivirus alerts from cmd/PowerShell intermediaries)
+- Watch Mode preserves source directory structure: files imported into matching subdirectories with original filenames (no rename)
+- DB schema migration 006: `import_subfolder` column on items table
+- File-based logging for tray and service modes: writes to `%LOCALAPPDATA%\kbintake\logs\`
+- Stale manifest detection: re-imports files when manifest record exists but vault file was deleted
+- Watch startup scan: walks watch directories on startup, imports files not yet tracked in manifest
+- `LocalFolderAdapter::store_copy_to()` for exact-path copy with auto-mkdir
 
 ### Notes
 
 - v1 `[[routing]]` config is still supported; v2 `[[routing_rules]]` take priority
-- All 169 tests passing (117 unit + 52 integration)
+- All 170 tests passing (118 unit + 52 integration)
 - COM DLL validated on Windows 11 physical hardware (top-level context menu, icon, install/uninstall)
 
 ## v1.0.1
