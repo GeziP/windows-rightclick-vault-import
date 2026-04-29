@@ -1,13 +1,25 @@
-# v1.0 Release Checklist
+# Release Checklist
 
-Use this checklist for the Windows `v1.0.0` release and future patch releases.
+Use this checklist for KBIntake releases. Adapt the version numbers as needed.
 
-## Release Metadata
+## Version Numbering (SemVer)
 
-- Version: `v1.0.0`
-- Release commit: `f6cec70` for the tag build, followed by `9cab26d` for winget manifest hash update
-- GitHub Release: `https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0`
-- Validation date: 2026-04-24
+| Type | Bump | When |
+|------|------|------|
+| **Patch** | `x.y.Z` | Bug fixes only |
+| **Minor** | `x.Y.0` | New features, backward compatible |
+| **Major** | `X.0.0` | Breaking changes |
+
+## Pre-release Gates (all must pass before tagging)
+
+- [ ] CI green on the release branch: `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt`
+- [ ] All planned epics/issues for this version are closed
+- [ ] No P0 bugs open
+- [ ] Config reference docs in sync with code structs (`kbintake config validate` passes with doc examples)
+- [ ] Template gallery examples parse correctly
+- [ ] End-to-end validation on Windows 10 and Windows 11
+- [ ] Release binary size: `kbintake.exe` < 15 MB
+- [ ] Winget manifest updated with correct version and SHA256
 
 ## Automated Checks
 
@@ -17,139 +29,117 @@ Run from `kbintake/`:
 cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --all-targets --all-features --locked -- -D warnings
-cargo build --locked
 cargo build --release --locked --bins
 ```
-
-The release workflow also runs tests and builds release binaries for `x86_64-pc-windows-msvc`.
 
 ## Release Assets
 
 Expected GitHub Release assets:
 
-- `KBIntake-Setup.exe`
+- `KBIntake-Setup.exe` (NSIS installer)
 - `kbintake.exe`
 - `kbintakew.exe`
 - `kbintake.ico`
 - `SHA256SUMS.txt`
 
-Users should prefer `KBIntake-Setup.exe`.
+## Smoke Tests
 
-## Installer Smoke Check
-
-Install from the generated setup executable:
+### Install & CLI
 
 ```powershell
 .\dist\KBIntake-Setup.exe
-```
-
-Open a new PowerShell window:
-
-```powershell
 kbintake --version
-kbintake version
 kbintake doctor
 ```
 
-Expected result:
-
-- version commands print `kbintake 1.0.0`
-- config is under `%LOCALAPPDATA%\kbintake`
-- schema reports `Schema version: 3 (up to date)`
-- target directory is OK
-- Explorer context menu is registered
-- PATH check is OK
-
-## Explorer Toast Smoke Check
-
-Run from the repository root:
+### Explorer Context Menu
 
 ```powershell
 .\scripts\validate-explorer-toast.ps1
 ```
 
-Expected result:
+Verify:
+- Right-click import works for files and folders
+- Toast notifications appear (success, duplicate, failure)
+- No console window for Explorer-triggered imports
+- Cascading submenu shows Import / Queue / Settings
 
-- `kbintake.exe`, `kbintakew.exe`, and `kbintake.ico` are staged under `%LOCALAPPDATA%\Programs\kbintake`
-- Explorer registry entries point at `kbintakew.exe explorer run-import`
-- manual prompts confirm success, duplicate, and failure toasts
-- manual prompts confirm Explorer imports do not show a console window
+### Watch Mode
 
-## Service Mode Smoke Check
+```powershell
+kbintake watch --path <test-dir>
+```
 
-Run from an elevated Administrator PowerShell session:
+Verify:
+- New files in watched directory auto-import
+- Directory structure preserved (subdirectories kept, files not renamed)
+- Startup scan imports existing files
+- Duplicate detection works
+
+### Service Mode (elevated PowerShell)
 
 ```powershell
 .\scripts\validate-service-mode.ps1
 ```
 
-Expected result:
-
-- `KBIntake` service installs, starts, stops, and uninstalls
-- a queued import is processed automatically by the service
-- `%TEMP%\kbintake-service-check\logs\service.log*` is created
-- post-uninstall status is `not installed`
-
-Manual item still pending:
-
-- reboot-resume validation for service mode
-
-## Winget Manifest Check
-
-The winget installer manifest declares `Microsoft.VCRedist.2015+.x64` because the
-MSVC release binaries require `VCRUNTIME140.dll` on clean Windows installs.
-
-Run from the repository root:
+### System Tray
 
 ```powershell
-winget validate --manifest .\installer\winget\1.0.0
+kbintakew.exe tray
 ```
 
-Expected result:
+Verify:
+- Tray icon appears
+- Right-click menu shows Settings / Auto-start / Exit
+- Settings opens TUI
+- Auto-start toggles HKCU\Run
+- Exit cleans up
 
-```text
-Manifest validation succeeded.
-```
+## Release Execution
 
-Local manifest install requires this setting to be enabled by an administrator:
+1. Update `version` in `kbintake/Cargo.toml`
+2. Update `CHANGELOG.md`: rename `[Unreleased]` to `[version] - date`, add new empty `[Unreleased]`
+3. Final local CI: `cargo build --release && cargo test && cargo clippy && cargo fmt --check`
+4. Commit: `git commit -m "chore: release v2.0.0"`
+5. Tag: `git tag -a v2.0.0 -m "KBIntake v2.0.0"`
+6. Push: `git push origin main && git push origin v2.0.0`
+7. Verify GitHub Actions release workflow succeeds
+8. Edit GitHub Release with release notes
+9. Submit winget manifest PR to `microsoft/winget-pkgs`
+10. Update documentation issues
 
-```powershell
-winget settings --enable LocalManifestFiles
-```
+## CHANGELOG Format
 
-Then test:
+Follow [Keep a Changelog](https://keepachangelog.com). Use these sections (only include non-empty ones):
 
-```powershell
-winget install --manifest .\installer\winget\1.0.0 --silent --accept-source-agreements --accept-package-agreements
-```
+- `### Added` — new features
+- `### Changed` — behavior changes
+- `### Fixed` — bug fixes
+- `### Deprecated` — upcoming removals
+- `### Removed` — removed features
+- `### Security` — security fixes
+
+Entries should:
+- Start with a verb: "Add", "Fix", "Change"
+- Be user-facing, not implementation details
+- Reference issue numbers: `Add import template system (#58)`
 
 ## Rollback
 
-Remove Explorer entries:
-
 ```powershell
 kbintake explorer uninstall
-```
-
-Remove the Windows Service if installed:
-
-```powershell
 kbintake service stop
 kbintake service uninstall
-```
-
-Uninstall KBIntake from Windows Settings or run:
-
-```powershell
 & "$env:LOCALAPPDATA\Programs\kbintake\Uninstall.exe"
 ```
 
-Runtime state is stored under `%LOCALAPPDATA%\kbintake`. Do not delete it unless you intentionally want to remove config, queue history, manifests, logs, and the default vault.
+Runtime state lives under `%LOCALAPPDATA%\kbintake`. Do not delete unless intentionally clearing all data.
 
 ## Known Limitations
 
-- Release binaries are not Authenticode signed yet.
-- Windows SmartScreen may warn on first run.
-- Public winget availability is not complete until `microsoft/winget-pkgs#364698` is merged.
-- Only local-folder targets are implemented.
-- Windows service reboot-resume validation is still manual.
+- Release binaries are not Authenticode signed (SmartScreen may warn)
+- Winget availability pending `microsoft/winget-pkgs` PR merge
+- Service reboot-resume needs manual validation
+- Only local-folder targets supported
+- TUI watch config editing is basic
+- COM DLL requires admin for HKCR registration
