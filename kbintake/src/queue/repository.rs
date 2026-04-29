@@ -125,8 +125,8 @@ impl<'a> Repository<'a> {
             "INSERT INTO items (
                 item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                 source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                cli_tags, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                cli_tags, import_subfolder, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 &item.item_id,
                 &item.batch_id,
@@ -144,6 +144,7 @@ impl<'a> Repository<'a> {
                 item.error_code.as_deref(),
                 item.error_message.as_deref(),
                 item.cli_tags.as_deref(),
+                item.import_subfolder.as_deref(),
                 item.created_at.to_rfc3339(),
                 item.updated_at.to_rfc3339()
             ],
@@ -155,7 +156,7 @@ impl<'a> Repository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                     source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                    cli_tags, created_at, updated_at
+                    cli_tags, import_subfolder, created_at, updated_at
              FROM items WHERE batch_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![batch_id], row_to_item)?;
@@ -211,7 +212,7 @@ impl<'a> Repository<'a> {
             .query_row(
                 "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                         source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                        cli_tags, created_at, updated_at
+                        cli_tags, import_subfolder, created_at, updated_at
                  FROM items WHERE status = ?1 ORDER BY created_at ASC LIMIT 1",
                 params![state_machine::STATUS_QUEUED],
                 row_to_item,
@@ -366,12 +367,12 @@ impl<'a> Repository<'a> {
             .map_err(Into::into)
     }
 
-    pub fn find_manifest_by_hash(&self, target_id: &str, sha256: &str) -> Result<Option<String>> {
+    pub fn find_manifest_by_hash(&self, target_id: &str, sha256: &str) -> Result<Option<(String, String)>> {
         self.conn
             .query_row(
-                "SELECT record_id FROM manifest_records WHERE target_id = ?1 AND sha256 = ?2",
+                "SELECT record_id, stored_path FROM manifest_records WHERE target_id = ?1 AND sha256 = ?2",
                 params![target_id, sha256],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(Into::into)
@@ -524,8 +525,9 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ItemJob> {
         error_code: row.get(13)?,
         error_message: row.get(14)?,
         cli_tags: row.get(15)?,
-        created_at: parse_utc(row.get(16)?)?,
-        updated_at: parse_utc(row.get(17)?)?,
+        import_subfolder: row.get(16)?,
+        created_at: parse_utc(row.get(17)?)?,
+        updated_at: parse_utc(row.get(18)?)?,
     })
 }
 
@@ -652,7 +654,9 @@ mod tests {
         repo.insert_manifest(&record).unwrap();
 
         assert_eq!(
-            repo.find_manifest_by_hash("default", "abc123").unwrap(),
+            repo.find_manifest_by_hash("default", "abc123")
+                .unwrap()
+                .map(|(id, _)| id),
             Some(record_id)
         );
     }

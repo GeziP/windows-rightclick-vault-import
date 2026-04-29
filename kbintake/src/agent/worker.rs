@@ -124,38 +124,56 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         }
     };
 
-    if let Some(existing_record_id) = deduper::find_duplicate_record(&repo, &item.target_id, &hash)?
+    if let Some((existing_record_id, stored_path)) = deduper::find_duplicate_record(&repo, &item.target_id, &hash)?
     {
-        repo.mark_item_duplicate(&item.item_id, &existing_record_id)?;
-        record_item_event(
-            &repo,
-            &item,
-            "item.duplicate",
-            serde_json::json!({
-                "status": "duplicate",
-                "duplicate_of": existing_record_id
-            }),
-        )?;
-        warn!(item_id = %item.item_id, duplicate_of = %existing_record_id, "duplicate skipped");
-        return Ok(());
+        // If the stored file still exists, it's a genuine duplicate.
+        if std::path::Path::new(&stored_path).exists() {
+            repo.mark_item_duplicate(&item.item_id, &existing_record_id)?;
+            record_item_event(
+                &repo,
+                &item,
+                "item.duplicate",
+                serde_json::json!({
+                    "status": "duplicate",
+                    "duplicate_of": existing_record_id
+                }),
+            )?;
+            warn!(item_id = %item.item_id, duplicate_of = %existing_record_id, "duplicate skipped");
+            return Ok(());
+        }
+        // File was deleted — remove stale manifest record and re-import.
+        info!(item_id = %item.item_id, stored_path = %stored_path, "manifest record exists but file missing, re-importing");
+        let _ = repo.delete_manifest_by_item(&existing_record_id);
     }
 
     repo.update_item_running(&item.item_id, "copying")?;
-    let destination_root = rendered_template
-        .as_ref()
-        .and_then(|template| template.subfolder.as_deref())
-        .filter(|subfolder| !subfolder.trim().is_empty())
-        .map(|subfolder| target.root_path.join(subfolder))
-        .or_else(|| {
-            target
-                .default_subfolder
-                .as_deref()
-                .filter(|subfolder| !subfolder.trim().is_empty())
-                .map(|subfolder| target.root_path.join(subfolder))
-        })
-        .unwrap_or_else(|| target.root_path.clone());
-    let adapter = LocalFolderAdapter::new(destination_root);
-    let dest = match adapter.store_copy(&source, &item.source_name) {
+
+    let (dest, adapter) = if let Some(ref subfolder) = item.import_subfolder {
+        // Watch mode with preserved directory structure — use exact path, no rename.
+        let dest_root = target.root_path.join(subfolder);
+        let adapter = LocalFolderAdapter::new(&dest_root);
+        let dest = dest_root.join(&item.source_name);
+        (dest, adapter)
+    } else {
+        let destination_root = rendered_template
+            .as_ref()
+            .and_then(|template| template.subfolder.as_deref())
+            .filter(|subfolder| !subfolder.trim().is_empty())
+            .map(|subfolder| target.root_path.join(subfolder))
+            .or_else(|| {
+                target
+                    .default_subfolder
+                    .as_deref()
+                    .filter(|subfolder| !subfolder.trim().is_empty())
+                    .map(|subfolder| target.root_path.join(subfolder))
+            })
+            .unwrap_or_else(|| target.root_path.clone());
+        let adapter = LocalFolderAdapter::new(&destination_root);
+        let dest = adapter.available_destination(&item.source_name);
+        (dest, adapter)
+    };
+
+    let dest = match adapter.store_copy_to(&source, &dest) {
         Ok(dest) => dest,
         Err(err) => {
             repo.mark_item_failed(&item.item_id, "E_COPY_FAILED", &err.to_string())?;
@@ -236,26 +254,31 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         hash,
     );
     if let Err(err) = repo.insert_manifest(&record) {
-        if let Some(existing_record_id) =
+        if let Some((existing_record_id, stored_path)) =
             deduper::find_duplicate_record(&repo, &item.target_id, &record.sha256)?
         {
-            repo.mark_item_duplicate(&item.item_id, &existing_record_id)?;
-            record_item_event(
-                &repo,
-                &item,
-                "item.duplicate",
-                serde_json::json!({
-                    "status": "duplicate",
-                    "duplicate_of": existing_record_id
-                }),
-            )?;
-            warn!(
-                item_id = %item.item_id,
-                duplicate_of = %existing_record_id,
-                error = %err,
-                "manifest insert raced with existing duplicate"
-            );
-            return Ok(());
+            if std::path::Path::new(&stored_path).exists() {
+                repo.mark_item_duplicate(&item.item_id, &existing_record_id)?;
+                record_item_event(
+                    &repo,
+                    &item,
+                    "item.duplicate",
+                    serde_json::json!({
+                        "status": "duplicate",
+                        "duplicate_of": existing_record_id
+                    }),
+                )?;
+                warn!(
+                    item_id = %item.item_id,
+                    duplicate_of = %existing_record_id,
+                    error = %err,
+                    "manifest insert raced with existing duplicate"
+                );
+                return Ok(());
+            }
+            // File was deleted — remove stale record and retry.
+            info!(item_id = %item.item_id, stored_path = %stored_path, "stale manifest, deleting and retrying");
+            let _ = repo.delete_manifest_by_item(&existing_record_id);
         }
 
         repo.mark_item_failed(&item.item_id, "E_MANIFEST_FAILED", &err.to_string())?;

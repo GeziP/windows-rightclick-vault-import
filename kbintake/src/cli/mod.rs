@@ -91,6 +91,11 @@ pub enum Commands {
     },
     #[command(about = "Open interactive settings TUI")]
     Tui,
+    #[command(about = "Run as system tray icon with background watcher")]
+    Tray {
+        #[arg(long, help = "Start minimized (for autostart)")]
+        minimized: bool,
+    },
     #[command(about = "Obsidian URI utilities")]
     Obsidian {
         #[command(subcommand)]
@@ -1774,6 +1779,118 @@ pub fn handle_obsidian(command: ObsidianCommands) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Undo a batch by ID — used by the TUI Jobs tab.
+pub fn handle_undo_batch_via_tui(app_data_dir: &std::path::Path, batch_id: &str) -> Result<String> {
+    let app = App::bootstrap_in(app_data_dir.to_path_buf())?;
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+
+    let batch = repo.get_batch(batch_id)?;
+    if batch.status == crate::queue::state_machine::STATUS_UNDONE
+        || batch.status == crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
+    {
+        return Ok("Batch already undone.".to_string());
+    }
+    if batch.status == crate::queue::state_machine::STATUS_QUEUED
+        || batch.status == crate::queue::state_machine::STATUS_RUNNING
+    {
+        anyhow::bail!("Cannot undo batch while it is {}.", batch.status);
+    }
+
+    let items = repo.list_items_by_batch(batch_id)?;
+    let mut deleted_count = 0usize;
+    let mut skipped_count = 0usize;
+
+    for item in items {
+        if item.status != crate::queue::state_machine::STATUS_SUCCESS {
+            continue;
+        }
+        let Some(stored_path) = item.stored_path.clone() else {
+            let msg = format!("File path missing for item '{}'.", item.item_id);
+            repo.mark_item_undo_skipped_modified(&item.item_id, &msg)?;
+            skipped_count += 1;
+            continue;
+        };
+        let path = PathBuf::from(&stored_path);
+        if path.exists() {
+            let hash_ok = if let Some(expected) = item.stored_sha256.as_deref() {
+                crate::processor::hasher::sha256_file(&path)? == expected
+            } else {
+                true
+            };
+            if !hash_ok {
+                let msg = format!("File '{}' modified since import, skipped.", stored_path);
+                repo.mark_item_undo_skipped_modified(&item.item_id, &msg)?;
+                skipped_count += 1;
+                continue;
+            }
+            std::fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+        }
+        repo.delete_manifest_by_item(&item.item_id)?;
+        repo.mark_item_undone(&item.item_id)?;
+        deleted_count += 1;
+    }
+
+    let batch_status = if skipped_count > 0 {
+        crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
+    } else {
+        crate::queue::state_machine::STATUS_UNDONE
+    };
+    repo.update_batch_status(batch_id, batch_status)?;
+
+    Ok(format!(
+        "Undo complete: {} deleted, {} skipped.",
+        deleted_count, skipped_count
+    ))
+}
+
+/// Run doctor checks and return issue descriptions — used by the TUI Service tab.
+pub fn run_doctor_checks(app: &App) -> Result<Vec<String>> {
+    let mut issues = Vec::new();
+    let lang = app.config.language();
+
+    let config_path = app.config.config_path();
+    if !config_path.exists() {
+        issues.push(format!("Config file missing at {}", config_path.display()));
+    }
+
+    match app.open_conn() {
+        Ok(conn) => {
+            if let Err(err) = crate::db::validate_schema(&conn) {
+                issues.push(format!("Database schema: {err}"));
+            }
+        }
+        Err(err) => {
+            issues.push(format!("Database: {err}"));
+        }
+    }
+
+    match app.config.default_target() {
+        Ok(target) => {
+            if !target.root_path.exists() {
+                issues.push(format!(
+                    "Target directory missing: {}",
+                    target.root_path.display()
+                ));
+            }
+        }
+        Err(err) => {
+            issues.push(format!("Default target: {err}"));
+        }
+    }
+
+    if !crate::explorer::is_installed().unwrap_or(false) {
+        issues.push(tr("explorer.install_unsupported", lang).to_string());
+    }
+
+    for warning in app.config.routing_warnings() {
+        issues.push(warning);
+    }
+
+    Ok(issues)
 }
 
 #[cfg(test)]

@@ -14,7 +14,8 @@ fn main() -> ExitCode {
     let _log_guard = match &cli.command {
         Commands::Service {
             command: ServiceCommands::Run,
-        } => {
+        }
+        | Commands::Tray { .. } => {
             let log_dir = cli
                 .app_data_dir
                 .clone()
@@ -123,6 +124,12 @@ fn main() -> ExitCode {
             .and_then(|app| kbintake::tui::run_settings_tui(app.config))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
+        Commands::Tray { .. } => {
+            let dir = app_data_dir.unwrap_or_else(kbintake::config::default_app_data_dir);
+            kbintake::tray::run_tray(dir)
+                .map(|()| exit_codes::SUCCESS)
+                .map_err(|err| (CommandKind::Config, err))
+        }
         Commands::Obsidian { command } => cli::handle_obsidian(command)
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),

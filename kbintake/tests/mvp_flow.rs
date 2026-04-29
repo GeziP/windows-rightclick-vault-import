@@ -1266,7 +1266,7 @@ fn cli_doctor_fix_creates_missing_target_and_reports_checks() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[OK] Config file"));
     assert!(stdout.contains("[OK] Database schema"));
-    assert!(stdout.contains("Schema version: 5 (up to date)"));
+    assert!(stdout.contains("Schema version: 6 (up to date)"));
     assert!(stdout.contains("[OK] Target directory"));
     assert!(app_data_dir.join("vault").exists());
 }
@@ -1308,7 +1308,7 @@ fn cli_doctor_migrate_flag_reports_schema_version() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Schema version: 5 (up to date)"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Schema version: 6 (up to date)"));
 }
 
 #[test]

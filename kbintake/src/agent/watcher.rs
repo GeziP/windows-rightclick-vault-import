@@ -133,6 +133,9 @@ pub fn run_watcher(
         watch_configs.first().map(|c| c.debounce_secs).unwrap_or(2)
     );
 
+    // Scan existing files on startup and import any not yet in the vault.
+    scan_existing_files(app, &watch_configs)?;
+
     // Collect all watched configs keyed by parent directory prefix for matching.
     let mut debounce_map: HashMap<PathBuf, DebounceTracker> = HashMap::new();
     for config in &watch_configs {
@@ -276,11 +279,19 @@ fn process_stable_file(app: &App, config: &WatchConfig, file_path: &Path) -> Res
     ))?;
 
     // Create item.
-    let item = ItemJob::new(
+    let mut item = ItemJob::new(
         batch.batch_id.clone(),
         intent.target.target_id,
         file_path.to_path_buf(),
     );
+    // Preserve directory structure from watch root.
+    if let Some(relative) = file_path
+        .parent()
+        .and_then(|p| p.strip_prefix(&config.path).ok())
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        item.import_subfolder = Some(relative.to_string_lossy().to_string());
+    }
     repo.insert_item(&item)?;
     repo.insert_event(&crate::domain::DomainEvent::new(
         "item",
@@ -357,6 +368,96 @@ where
     }
     Err(last_err
         .unwrap_or_else(|| anyhow::anyhow!("file locked after {} retries", MAX_LOCK_RETRIES)))
+}
+
+/// On startup, scan watch directories for files that haven't been imported yet
+/// and process them through the import pipeline.
+fn scan_existing_files(app: &App, watch_configs: &[WatchConfig]) -> Result<()> {
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+
+    let mut imported = 0u64;
+    let mut skipped = 0u64;
+
+    for config in watch_configs {
+        for entry in walkdir::WalkDir::new(&config.path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            // Extension filter check.
+            if let Some(extensions) = &config.extensions {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    let ext_with_dot = format!(".{}", ext);
+                    if !extensions.matches_case_insensitive(&ext_with_dot) {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+
+            let metadata = match std::fs::metadata(path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let size = metadata.len();
+
+            // Hash the file to check for duplicates in manifest.
+            let hash = match crate::processor::hasher::sha256_file(path) {
+                Ok(h) => h,
+                Err(_) => continue,
+            };
+
+            // Resolve target for dedup check.
+            let intent = match app.config.resolve_import_intent(
+                path,
+                size,
+                config.target.clone(),
+                config.template.clone(),
+            ) {
+                Ok(i) => i,
+                Err(_) => continue,
+            };
+
+            // Skip if already imported (by target + hash) AND file still exists in vault.
+            if let Some((_, stored_path)) = repo
+                .find_manifest_by_hash(&intent.target.target_id, &hash)?
+            {
+                if std::path::Path::new(&stored_path).exists() {
+                    skipped += 1;
+                    continue;
+                }
+                // Manifest record exists but file was deleted — re-import.
+                info!(
+                    "manifest record exists but file missing, re-importing: {}",
+                    path.display()
+                );
+            }
+
+            // Import the file.
+            match process_stable_file(app, config, path) {
+                Ok(true) => {
+                    imported += 1;
+                    info!("startup scan imported: {}", path.display());
+                }
+                Ok(false) => skipped += 1,
+                Err(e) => warn!("startup scan failed for {}: {:#}", path.display(), e),
+            }
+        }
+    }
+
+    if imported > 0 || skipped > 0 {
+        info!(
+            "startup scan complete: {} file(s) imported, {} skipped",
+            imported, skipped
+        );
+    }
+    Ok(())
 }
 
 fn resolve_watch_configs(app: &App, cli_paths: Option<Vec<PathBuf>>) -> Result<Vec<WatchConfig>> {

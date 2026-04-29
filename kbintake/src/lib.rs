@@ -15,4 +15,5 @@ pub mod obsidian;
 pub mod processor;
 pub mod queue;
 pub mod service;
+pub mod tray;
 pub mod tui;

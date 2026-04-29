@@ -17,6 +17,7 @@ use ratatui::{
 };
 
 use crate::config::{AppConfig, StringList, WatchConfig};
+use crate::domain::{BatchJob, ItemJob};
 use crate::i18n::tr;
 
 /// Active tab in the TUI.
@@ -26,6 +27,8 @@ enum TabId {
     Import = 1,
     Watch = 2,
     Templates = 3,
+    Jobs = 4,
+    Service = 5,
 }
 
 /// Text input mode for the overlay.
@@ -53,10 +56,19 @@ struct SettingsUi {
     input_mode: InputMode,
     input_buffer: String,
     pending_target_name: Option<String>,
+    // Jobs tab state
+    app_data_dir: PathBuf,
+    jobs_cache: Vec<BatchJob>,
+    items_cache: Vec<ItemJob>,
+    showing_items_for: Option<String>,
+    // Service tab state
+    service_status: String,
+    explorer_installed: bool,
 }
 
 impl SettingsUi {
     fn new(config: AppConfig) -> Self {
+        let app_data_dir = config.app_data_dir.clone();
         Self {
             config,
             active_tab: TabId::Targets,
@@ -66,6 +78,12 @@ impl SettingsUi {
             input_mode: InputMode::Normal,
             input_buffer: String::new(),
             pending_target_name: None,
+            app_data_dir,
+            jobs_cache: Vec::new(),
+            items_cache: Vec::new(),
+            showing_items_for: None,
+            service_status: String::new(),
+            explorer_installed: false,
         }
     }
 
@@ -85,6 +103,8 @@ impl SettingsUi {
             "tui.tab_import",
             "tui.tab_watch",
             "tui.tab_templates",
+            "tui.tab_jobs",
+            "tui.tab_service",
         ];
         keys.iter()
             .map(|k| Span::raw(tr(k, self.lang()).to_string()))
@@ -96,13 +116,20 @@ impl SettingsUi {
             TabId::Targets => self.config.targets.len(),
             TabId::Watch => self.config.watch.len(),
             TabId::Templates => self.config.templates.len(),
-            TabId::Import => 0,
+            TabId::Jobs => {
+                if self.showing_items_for.is_some() {
+                    self.items_cache.len()
+                } else {
+                    self.jobs_cache.len()
+                }
+            }
+            TabId::Import | TabId::Service => 0,
         }
     }
 
     fn clamp_selected(&mut self) {
         let count = self.item_count();
-        if self.selected_index >= count && count > 0 {
+        if count > 0 && self.selected_index >= count {
             self.selected_index = count - 1;
         }
     }
@@ -119,6 +146,16 @@ impl SettingsUi {
             self.selected_index += 1;
         }
     }
+
+    fn open_conn(&self) -> Result<rusqlite::Connection> {
+        let db_path = self.app_data_dir.join("data").join("kbintake.db");
+        let conn = rusqlite::Connection::open_with_flags(
+            &db_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.execute_batch("PRAGMA journal_mode=WAL")?;
+        Ok(conn)
+    }
 }
 
 /// Run the interactive settings TUI.
@@ -130,6 +167,11 @@ pub fn run_settings_tui(config: AppConfig) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut ui = SettingsUi::new(config);
+
+    // Pre-load data for Jobs and Service tabs
+    refresh_jobs(&mut ui);
+    refresh_service_status(&mut ui);
+
     let result = run_loop(&mut terminal, &mut ui);
 
     disable_raw_mode()?;
@@ -166,6 +208,21 @@ fn run_loop(
                 continue;
             }
 
+            // Jobs detail view has limited keys
+            if ui.showing_items_for.is_some() && ui.active_tab == TabId::Jobs {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Backspace => {
+                        ui.showing_items_for = None;
+                        ui.selected_index = 0;
+                    }
+                    KeyCode::Up => ui.move_up(),
+                    KeyCode::Down => ui.move_down(),
+                    _ => {}
+                }
+                continue;
+            }
+
             match key.code {
                 KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                 KeyCode::Char('1') => {
@@ -183,17 +240,40 @@ fn run_loop(
                     ui.active_tab = TabId::Templates;
                     ui.selected_index = 0;
                 }
+                KeyCode::Char('5') => {
+                    ui.active_tab = TabId::Jobs;
+                    ui.selected_index = 0;
+                    refresh_jobs(ui);
+                }
+                KeyCode::Char('6') => {
+                    ui.active_tab = TabId::Service;
+                    refresh_service_status(ui);
+                }
                 KeyCode::Up => ui.move_up(),
                 KeyCode::Down => ui.move_down(),
                 KeyCode::Char('s') => {
-                    if let Err(e) = ui.save_config() {
+                    if ui.active_tab == TabId::Service {
+                        start_service(ui);
+                    } else if let Err(e) = ui.save_config() {
                         ui.message = format!("ERROR: {e:#}");
                     } else {
                         ui.pending_save = false;
                     }
                 }
+                KeyCode::Char('S') if ui.active_tab == TabId::Service => {
+                    stop_service(ui);
+                }
                 KeyCode::Char('a') => handle_add(ui),
+                KeyCode::Char('r') if ui.active_tab == TabId::Jobs => {
+                    retry_selected_job(ui);
+                }
                 KeyCode::Char('r') => handle_remove(ui),
+                KeyCode::Char('u') if ui.active_tab == TabId::Jobs => {
+                    undo_selected_job(ui);
+                }
+                KeyCode::Char('u') if ui.active_tab == TabId::Service => {
+                    uninstall_service(ui);
+                }
                 KeyCode::Char('d') => handle_default(ui),
                 KeyCode::Char('f') => handle_toggle_frontmatter(ui),
                 KeyCode::Char('l') => handle_toggle_language(ui),
@@ -203,6 +283,30 @@ fn run_loop(
                 KeyCode::Char('b') => handle_edit_watch_field(ui, InputField::Debounce),
                 KeyCode::Char('p') => handle_edit_watch_field(ui, InputField::Template),
                 KeyCode::Char('+') | KeyCode::Char('-') => handle_size_adjust(ui, key.code),
+                KeyCode::Char('i') if ui.active_tab == TabId::Service => {
+                    install_service(ui);
+                }
+                KeyCode::Char('m') if ui.active_tab == TabId::Service => {
+                    install_explorer(ui);
+                }
+                KeyCode::Char('M') if ui.active_tab == TabId::Service => {
+                    uninstall_explorer(ui);
+                }
+                KeyCode::Char('w') if ui.active_tab == TabId::Service => {
+                    toggle_watch_in_service(ui);
+                }
+                KeyCode::Char('D') if ui.active_tab == TabId::Service => {
+                    run_doctor(ui);
+                }
+                KeyCode::Enter if ui.active_tab == TabId::Jobs => {
+                    show_job_detail(ui);
+                }
+                KeyCode::F(5) if ui.active_tab == TabId::Jobs => {
+                    refresh_jobs(ui);
+                }
+                KeyCode::F(5) if ui.active_tab == TabId::Service => {
+                    refresh_service_status(ui);
+                }
                 _ => {}
             }
         }
@@ -264,6 +368,11 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     ui.input_buffer.clear();
                     ui.input_mode = InputMode::AddingTargetPath;
                     ui.message.clear();
+                    try_folder_picker(ui);
+                    if !ui.input_buffer.is_empty() {
+                        let code = KeyCode::Enter;
+                        handle_text_input(ui, code);
+                    }
                 }
                 InputMode::AddingTargetPath => {
                     let path = PathBuf::from(&input);
@@ -448,6 +557,8 @@ fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         TabId::Import => render_import(frame, ui, chunks[1]),
         TabId::Watch => render_watch(frame, ui, chunks[1]),
         TabId::Templates => render_templates(frame, ui, chunks[1]),
+        TabId::Jobs => render_jobs(frame, ui, chunks[1]),
+        TabId::Service => render_service(frame, ui, chunks[1]),
     }
 
     // Contextual footer
@@ -456,6 +567,14 @@ fn render(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         TabId::Import => "tui.help_import",
         TabId::Watch => "tui.help_watch",
         TabId::Templates => "tui.help_templates",
+        TabId::Jobs => {
+            if ui.showing_items_for.is_some() {
+                "tui.help_jobs_detail"
+            } else {
+                "tui.help_jobs"
+            }
+        }
+        TabId::Service => "tui.help_service",
     };
     let footer_text = if ui.message.is_empty() {
         tr(help_key, lang).to_string()
@@ -586,7 +705,6 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
         .constraints([Constraint::Length(2), Constraint::Min(1)])
         .split(area);
 
-    // Description
     let desc = Paragraph::new(Span::styled(
         tr("tui.desc_targets", lang),
         Style::default().fg(Color::Cyan),
@@ -656,7 +774,7 @@ fn render_import(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
     };
     let lang_display = ui.config.import.language.as_deref().unwrap_or("en");
     let lang_label = if lang_display == "zh-CN" {
-        "简体中文"
+        "\u{7b80}\u{4f53}\u{4e2d}\u{6587}"
     } else {
         "English"
     };
@@ -725,7 +843,6 @@ fn render_watch(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
         .constraints([Constraint::Length(2), Constraint::Min(1)])
         .split(area);
 
-    // Description
     let desc = Paragraph::new(Span::styled(
         tr("tui.desc_watch", lang),
         Style::default().fg(Color::Cyan),
@@ -857,6 +974,248 @@ fn render_templates(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
     frame.render_widget(table, chunks[1]);
 }
 
+// --- Jobs tab rendering ---
+
+fn render_jobs(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
+    let lang = ui.lang();
+
+    if let Some(batch_id) = &ui.showing_items_for {
+        render_job_items(frame, ui, area, batch_id);
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(1)])
+        .split(area);
+
+    let desc = Paragraph::new(Span::styled(
+        tr("tui.desc_jobs", lang),
+        Style::default().fg(Color::Cyan),
+    ));
+    frame.render_widget(desc, chunks[0]);
+
+    if ui.jobs_cache.is_empty() {
+        let lines = vec![Line::from(tr("tui.no_jobs", lang))];
+        let para = Paragraph::new(lines).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(tr("tui.tab_jobs", lang)),
+        );
+        frame.render_widget(para, chunks[1]);
+        return;
+    }
+
+    let header = Row::new(vec![
+        Cell::from(tr("tui.batch_col", lang)),
+        Cell::from(tr("tui.source_col", lang)),
+        Cell::from(tr("tui.target_col", lang)),
+        Cell::from(tr("tui.status_col", lang)),
+        Cell::from(tr("tui.items", lang).replace("Items: ", "")),
+        Cell::from(tr("tui.time_col", lang)),
+    ])
+    .style(Style::default().fg(Color::Yellow));
+
+    let rows: Vec<Row> = ui
+        .jobs_cache
+        .iter()
+        .enumerate()
+        .map(|(i, batch)| {
+            let short_id = &batch.batch_id[..8.min(batch.batch_id.len())];
+            let status_label = status_label(&batch.status, lang);
+            let time = batch.created_at.format("%m-%d %H:%M").to_string();
+            let row = Row::new(vec![
+                Cell::from(short_id),
+                Cell::from(batch.source.clone()),
+                Cell::from(batch.target_id.clone()),
+                Cell::from(status_label),
+                Cell::from(batch.source_count.to_string()),
+                Cell::from(time),
+            ]);
+            if i == ui.selected_index {
+                row.style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            } else {
+                row
+            }
+        })
+        .collect();
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Length(12),
+            Constraint::Length(10),
+            Constraint::Length(6),
+            Constraint::Length(12),
+        ],
+    )
+    .header(header)
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(tr("tui.tab_jobs", lang)),
+    );
+    frame.render_widget(table, chunks[1]);
+}
+
+fn render_job_items(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect, batch_id: &str) {
+    let lang = ui.lang();
+    let short_id = &batch_id[..8.min(batch_id.len())];
+
+    let header = Row::new(vec![
+        Cell::from(tr("tui.item_name_col", lang)),
+        Cell::from(tr("tui.item_status_col", lang)),
+        Cell::from(tr("tui.item_path_col", lang)),
+    ])
+    .style(Style::default().fg(Color::Yellow));
+
+    let rows: Vec<Row> = ui
+        .items_cache
+        .iter()
+        .enumerate()
+        .map(|(i, item)| {
+            let status_label = status_label(&item.status, lang);
+            let row = Row::new(vec![
+                Cell::from(item.source_name.clone()),
+                Cell::from(status_label),
+                Cell::from(
+                    item.stored_path
+                        .as_deref()
+                        .unwrap_or(&item.source_path)
+                        .to_string(),
+                ),
+            ]);
+            if i == ui.selected_index {
+                row.style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            } else {
+                row
+            }
+        })
+        .collect();
+
+    let title = tr("tui.detail_title", lang).replace("{}", short_id);
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(25),
+            Constraint::Length(10),
+            Constraint::Min(20),
+        ],
+    )
+    .header(header)
+    .block(Block::default().borders(Borders::ALL).title(title));
+    frame.render_widget(table, area);
+}
+
+fn status_label(status: &str, lang: &str) -> String {
+    match status {
+        "success" => tr("tui.status_success", lang).to_string(),
+        "failed" => tr("tui.status_failed", lang).to_string(),
+        "duplicate" => tr("tui.status_duplicate", lang).to_string(),
+        "queued" => tr("tui.status_queued", lang).to_string(),
+        "running" => tr("tui.status_running", lang).to_string(),
+        "undone" | "undo_skipped_modified" | "partially_undone" => {
+            tr("tui.status_undone", lang).to_string()
+        }
+        _ => status.to_string(),
+    }
+}
+
+// --- Service tab rendering ---
+
+fn render_service(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
+    let lang = ui.lang();
+
+    let svc_status = if ui.service_status.is_empty() {
+        "..."
+    } else {
+        &ui.service_status
+    };
+    let svc_label = match svc_status {
+        "running" => tr("tui.status_success", lang),
+        "stopped" => tr("tui.status_failed", lang),
+        _ => tr(svc_status, lang),
+    };
+    let explorer_label = if ui.explorer_installed {
+        tr("tui.installed", lang)
+    } else {
+        tr("tui.not_installed", lang)
+    };
+    let watch_label = if ui.config.agent.watch_in_service {
+        tr("tui.on", lang)
+    } else {
+        tr("tui.off", lang)
+    };
+
+    let lines = vec![
+        Line::from(Span::styled(
+            tr("tui.desc_service", lang),
+            Style::default().fg(Color::Cyan),
+        )),
+        Line::from(Span::default()),
+        // Service section
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", tr("tui.service_status_label", lang)),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(svc_label),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", tr("tui.watch_in_service_label", lang)),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(watch_label),
+            Span::styled("  [w]", Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(Span::styled(
+            format!(
+                "  [i] {}  [s] {}  [S] {}  [u] {}",
+                tr("tui.service_installed", lang),
+                tr("tui.service_started", lang),
+                tr("tui.service_stopped", lang),
+                tr("tui.service_uninstalled", lang),
+            ),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::default()),
+        // Explorer section
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", tr("tui.explorer_status_label", lang)),
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(explorer_label),
+        ]),
+        Line::from(Span::styled(
+            format!(
+                "  [m] {}  [M] {}",
+                tr("tui.explorer_installed_msg", lang),
+                tr("tui.explorer_uninstalled_msg", lang),
+            ),
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::default()),
+        // Doctor section
+        Line::from(Span::styled(
+            format!(
+                "[D] {}",
+                tr("tui.desc_service", lang).split(',').next().unwrap_or("")
+            ),
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+    let para = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(tr("tui.tab_service", lang)),
+    );
+    frame.render_widget(para, area);
+}
+
 // --- Action handlers ---
 
 fn handle_add(ui: &mut SettingsUi) {
@@ -868,9 +1227,26 @@ fn handle_add(ui: &mut SettingsUi) {
             ui.message.clear();
         }
         TabId::Watch => {
-            ui.input_mode = InputMode::AddingWatchPath;
+            let old_buffer = ui.input_buffer.clone();
             ui.input_buffer.clear();
-            ui.message.clear();
+            ui.input_mode = InputMode::AddingWatchPath;
+            try_folder_picker(ui);
+            if ui.input_buffer.is_empty() {
+                ui.input_buffer = old_buffer;
+            } else {
+                let path = PathBuf::from(&ui.input_buffer);
+                ui.config.watch.push(WatchConfig {
+                    path,
+                    target: None,
+                    debounce_secs: 2,
+                    extensions: None,
+                    template: None,
+                });
+                ui.selected_index = ui.config.watch.len() - 1;
+                ui.pending_save = true;
+                ui.input_mode = InputMode::Normal;
+                ui.input_buffer.clear();
+            }
         }
         _ => {}
     }
@@ -1034,6 +1410,236 @@ fn try_path_complete(ui: &mut SettingsUi) {
         ui.message = format!("Matches: {}", matches.join(", "));
     }
 }
+
+// --- Jobs actions ---
+
+fn refresh_jobs(ui: &mut SettingsUi) {
+    ui.showing_items_for = None;
+    ui.items_cache.clear();
+    match ui.open_conn() {
+        Ok(conn) => {
+            let repo = crate::queue::repository::Repository::new(&conn);
+            match repo.list_batches(50) {
+                Ok(batches) => {
+                    ui.jobs_cache = batches;
+                    ui.clamp_selected();
+                    ui.message.clear();
+                }
+                Err(e) => {
+                    ui.message = format!("DB error: {e:#}");
+                }
+            }
+        }
+        Err(e) => {
+            ui.message = format!("DB error: {e:#}");
+        }
+    }
+}
+
+fn show_job_detail(ui: &mut SettingsUi) {
+    if ui.jobs_cache.is_empty() {
+        return;
+    }
+    let idx = ui.selected_index;
+    if idx >= ui.jobs_cache.len() {
+        return;
+    }
+    let batch_id = ui.jobs_cache[idx].batch_id.clone();
+    match ui.open_conn() {
+        Ok(conn) => {
+            let repo = crate::queue::repository::Repository::new(&conn);
+            match repo.list_items_by_batch(&batch_id) {
+                Ok(items) => {
+                    ui.items_cache = items;
+                    ui.showing_items_for = Some(batch_id);
+                    ui.selected_index = 0;
+                }
+                Err(e) => {
+                    ui.message = format!("DB error: {e:#}");
+                }
+            }
+        }
+        Err(e) => {
+            ui.message = format!("DB error: {e:#}");
+        }
+    }
+}
+
+fn retry_selected_job(ui: &mut SettingsUi) {
+    if ui.showing_items_for.is_some() || ui.jobs_cache.is_empty() {
+        return;
+    }
+    let idx = ui.selected_index;
+    if idx >= ui.jobs_cache.len() {
+        return;
+    }
+    let batch_id = ui.jobs_cache[idx].batch_id.clone();
+    let lang = ui.lang().to_string();
+    match ui.open_conn() {
+        Ok(conn) => {
+            let repo = crate::queue::repository::Repository::new(&conn);
+            match repo.retry_failed_items_by_batch(&batch_id) {
+                Ok(count) => {
+                    ui.message = format!("{} ({})", tr("tui.job_retried", &lang), count);
+                    refresh_jobs(ui);
+                }
+                Err(e) => {
+                    ui.message = tr("tui.job_retry_failed", &lang).replace("{}", &format!("{e:#}"));
+                }
+            }
+        }
+        Err(e) => {
+            ui.message = format!("DB error: {e:#}");
+        }
+    }
+}
+
+fn undo_selected_job(ui: &mut SettingsUi) {
+    if ui.showing_items_for.is_some() || ui.jobs_cache.is_empty() {
+        return;
+    }
+    let idx = ui.selected_index;
+    if idx >= ui.jobs_cache.len() {
+        return;
+    }
+    let batch_id = ui.jobs_cache[idx].batch_id.clone();
+    let lang = ui.lang().to_string();
+    match crate::cli::handle_undo_batch_via_tui(&ui.app_data_dir, &batch_id) {
+        Ok(msg) => {
+            ui.message = msg;
+            refresh_jobs(ui);
+        }
+        Err(e) => {
+            ui.message = tr("tui.job_undo_failed", &lang).replace("{}", &format!("{e:#}"));
+        }
+    }
+}
+
+// --- Service actions ---
+
+fn refresh_service_status(ui: &mut SettingsUi) {
+    ui.service_status = crate::service::status().unwrap_or_else(|e| format!("error: {e}"));
+    ui.explorer_installed = crate::explorer::is_installed().unwrap_or(false);
+    ui.message.clear();
+}
+
+fn install_service(ui: &mut SettingsUi) {
+    let lang = ui.lang().to_string();
+    match crate::service::install(&ui.app_data_dir) {
+        Ok(()) => {
+            ui.message = tr("tui.service_installed", &lang).to_string();
+        }
+        Err(e) => {
+            ui.message = tr("tui.service_op_failed", &lang).replace("{}", &format!("{e:#}"));
+        }
+    }
+    refresh_service_status(ui);
+}
+
+fn start_service(ui: &mut SettingsUi) {
+    let lang = ui.lang().to_string();
+    match crate::service::start() {
+        Ok(()) => {
+            ui.message = tr("tui.service_started", &lang).to_string();
+        }
+        Err(e) => {
+            ui.message = tr("tui.service_op_failed", &lang).replace("{}", &format!("{e:#}"));
+        }
+    }
+    refresh_service_status(ui);
+}
+
+fn stop_service(ui: &mut SettingsUi) {
+    let lang = ui.lang().to_string();
+    match crate::service::stop() {
+        Ok(()) => {
+            ui.message = tr("tui.service_stopped", &lang).to_string();
+        }
+        Err(e) => {
+            ui.message = tr("tui.service_op_failed", &lang).replace("{}", &format!("{e:#}"));
+        }
+    }
+    refresh_service_status(ui);
+}
+
+fn uninstall_service(ui: &mut SettingsUi) {
+    let lang = ui.lang().to_string();
+    match crate::service::uninstall() {
+        Ok(()) => {
+            ui.message = tr("tui.service_uninstalled", &lang).to_string();
+        }
+        Err(e) => {
+            ui.message = tr("tui.service_op_failed", &lang).replace("{}", &format!("{e:#}"));
+        }
+    }
+    refresh_service_status(ui);
+}
+
+fn install_explorer(ui: &mut SettingsUi) {
+    let lang = ui.lang().to_string();
+    match crate::explorer::default_install_options(&lang) {
+        Ok(options) => match crate::explorer::install(&options) {
+            Ok(_menus) => {
+                ui.message = tr("tui.explorer_installed_msg", &lang).to_string();
+            }
+            Err(e) => {
+                ui.message = tr("tui.explorer_op_failed", &lang).replace("{}", &format!("{e:#}"));
+            }
+        },
+        Err(e) => {
+            ui.message = format!("ERROR: {e:#}");
+        }
+    }
+    refresh_service_status(ui);
+}
+
+fn uninstall_explorer(ui: &mut SettingsUi) {
+    let lang = ui.lang().to_string();
+    match crate::explorer::uninstall() {
+        Ok(()) => {
+            ui.message = tr("tui.explorer_uninstalled_msg", &lang).to_string();
+        }
+        Err(e) => {
+            ui.message = tr("tui.explorer_op_failed", &lang).replace("{}", &format!("{e:#}"));
+        }
+    }
+    refresh_service_status(ui);
+}
+
+fn toggle_watch_in_service(ui: &mut SettingsUi) {
+    ui.config.agent.watch_in_service = !ui.config.agent.watch_in_service;
+    ui.pending_save = true;
+}
+
+fn run_doctor(ui: &mut SettingsUi) {
+    let lang = ui.lang().to_string();
+    match crate::app::App::bootstrap_in(ui.app_data_dir.clone()) {
+        Ok(app) => {
+            match crate::cli::run_doctor_checks(&app) {
+                Ok(issues) => {
+                    if issues.is_empty() {
+                        ui.message = tr("tui.doctor_ok", &lang).to_string();
+                    } else {
+                        ui.message =
+                            tr("tui.doctor_issues", &lang).replace("{}", &issues.len().to_string());
+                        // Show issues in a multi-line message (use first one)
+                        for issue in &issues {
+                            ui.message.push_str(&format!("\n  - {issue}"));
+                        }
+                    }
+                }
+                Err(e) => {
+                    ui.message = format!("Doctor error: {e:#}");
+                }
+            }
+        }
+        Err(e) => {
+            ui.message = format!("Bootstrap error: {e:#}");
+        }
+    }
+}
+
+// --- Folder picker ---
 
 #[cfg(windows)]
 fn try_folder_picker(ui: &mut SettingsUi) {

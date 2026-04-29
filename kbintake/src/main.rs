@@ -103,6 +103,16 @@ fn main() -> ExitCode {
             .and_then(|app| kbintake::tui::run_settings_tui(app.config))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
+        Commands::Tray { .. } => {
+            let lang = kbintake::config::AppConfig::load_or_init_in(
+                app_data_dir.unwrap_or_else(kbintake::config::default_app_data_dir),
+            )
+            .ok()
+            .map(|c| c.language().to_string())
+            .unwrap_or_else(|| "en".to_string());
+            eprintln!("{}", kbintake::i18n::tr("tray.console_hint", &lang));
+            Ok(exit_codes::GENERAL_ERROR)
+        }
         Commands::Obsidian { command } => {
             let kind = CommandKind::Config;
             cli::handle_obsidian(command)

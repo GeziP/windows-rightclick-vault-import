@@ -81,3 +81,7 @@ ALTER TABLE items ADD COLUMN stored_sha256 TEXT;
 pub const MIGRATION_005_ITEM_CLI_TAGS: &str = r#"
 ALTER TABLE items ADD COLUMN cli_tags TEXT;
 "#;
+
+pub const MIGRATION_006_ITEM_IMPORT_SUBFOLDER: &str = r#"
+ALTER TABLE items ADD COLUMN import_subfolder TEXT;
+"#;
