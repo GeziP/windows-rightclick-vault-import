@@ -45,8 +45,8 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force ..\dist | Out-Null
-          Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintake.exe ..\dist\kbintake.exe -Force
-          Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintakew.exe ..\dist\kbintakew.exe -Force
+          Copy-Item ..\target\x86_64-pc-windows-msvc\release\kbintake.exe ..\dist\kbintake.exe -Force
+          Copy-Item ..\target\x86_64-pc-windows-msvc\release\kbintakew.exe ..\dist\kbintakew.exe -Force
           Copy-Item .\assets\kbintake.ico ..\dist\kbintake.ico -Force
 
       - name: Install NSIS
