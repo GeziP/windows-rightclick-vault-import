@@ -368,11 +368,6 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                     ui.input_buffer.clear();
                     ui.input_mode = InputMode::AddingTargetPath;
                     ui.message.clear();
-                    try_folder_picker(ui);
-                    if !ui.input_buffer.is_empty() {
-                        let code = KeyCode::Enter;
-                        handle_text_input(ui, code);
-                    }
                 }
                 InputMode::AddingTargetPath => {
                     let path = PathBuf::from(&input);
@@ -677,7 +672,7 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         )),
         Line::from(Span::styled(
             if is_path_input_mode(&ui.input_mode) {
-                "[Enter] confirm  [Esc] cancel  [Tab] complete  [o] browse folder"
+                "[o] browse folder   [Enter] confirm   [Esc] cancel   [Tab] complete"
             } else {
                 "[Enter] confirm  [Esc] cancel  [Backspace] delete"
             },
