@@ -425,8 +425,8 @@ fn scan_existing_files(app: &App, watch_configs: &[WatchConfig]) -> Result<()> {
             };
 
             // Skip if already imported (by target + hash) AND file still exists in vault.
-            if let Some((_, stored_path)) = repo
-                .find_manifest_by_hash(&intent.target.target_id, &hash)?
+            if let Some((_, stored_path)) =
+                repo.find_manifest_by_hash(&intent.target.target_id, &hash)?
             {
                 if std::path::Path::new(&stored_path).exists() {
                     skipped += 1;

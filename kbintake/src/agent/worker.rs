@@ -124,7 +124,8 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         }
     };
 
-    if let Some((existing_record_id, stored_path)) = deduper::find_duplicate_record(&repo, &item.target_id, &hash)?
+    if let Some((existing_record_id, stored_path)) =
+        deduper::find_duplicate_record(&repo, &item.target_id, &hash)?
     {
         // If the stored file still exists, it's a genuine duplicate.
         if std::path::Path::new(&stored_path).exists() {

@@ -28,15 +28,14 @@ static WM_TASKBAR: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
 
 #[cfg(windows)]
 pub fn run_tray(app_data_dir: PathBuf) -> Result<()> {
+    use windows::core::w;
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Shell::{Shell_NotifyIconW, NIM_ADD, NIM_DELETE};
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DispatchMessageW, GetMessageW, RegisterClassExW,
-        RegisterWindowMessageW, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW,
-        WS_OVERLAPPED,
+        CreateWindowExW, DispatchMessageW, GetMessageW, RegisterClassExW, RegisterWindowMessageW,
+        TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WNDCLASSEXW, WS_OVERLAPPED,
     };
-    use windows::core::w;
 
     let config = crate::config::AppConfig::load_or_init_in(app_data_dir.clone())
         .context("failed to load config for tray")?;
@@ -47,8 +46,7 @@ pub fn run_tray(app_data_dir: PathBuf) -> Result<()> {
 
     let shutdown_flag = Arc::new(AtomicBool::new(false));
     let tooltip = if watch_count > 0 {
-        tr("tray.tooltip_active", &lang)
-            .replace("{}", &watch_count.to_string())
+        tr("tray.tooltip_active", &lang).replace("{}", &watch_count.to_string())
     } else {
         tr("tray.tooltip_idle", &lang).to_string()
     };
@@ -251,13 +249,13 @@ unsafe extern "system" fn wnd_proc(
 
 #[cfg(windows)]
 fn show_context_menu(hwnd: windows::Win32::Foundation::HWND) {
+    use windows::core::{HSTRING, PCWSTR};
     use windows::Win32::Foundation::{LPARAM, POINT, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreatePopupMenu, DestroyMenu, GetCursorPos, InsertMenuW, MF_BYPOSITION, MF_CHECKED,
-        MF_SEPARATOR, MF_STRING, PostMessageW, SetForegroundWindow, TrackPopupMenu,
-        TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_NULL,
+        CreatePopupMenu, DestroyMenu, GetCursorPos, InsertMenuW, PostMessageW, SetForegroundWindow,
+        TrackPopupMenu, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, MF_STRING, TPM_BOTTOMALIGN,
+        TPM_LEFTALIGN, WM_NULL,
     };
-    use windows::core::{HSTRING, PCWSTR};
 
     let (lang, autostart_on) = get_state(|s| (s.lang.clone(), s.autostart_enabled));
 
@@ -297,13 +295,7 @@ fn show_context_menu(hwnd: windows::Win32::Foundation::HWND) {
             ID_MENU_AUTOSTART,
             PCWSTR(autostart_text.as_ptr()),
         );
-        let _ = InsertMenuW(
-            menu,
-            2,
-            MF_BYPOSITION | MF_SEPARATOR,
-            0,
-            PCWSTR::null(),
-        );
+        let _ = InsertMenuW(menu, 2, MF_BYPOSITION | MF_SEPARATOR, 0, PCWSTR::null());
         let _ = InsertMenuW(
             menu,
             3,
@@ -331,9 +323,9 @@ fn show_context_menu(hwnd: windows::Win32::Foundation::HWND) {
 
 #[cfg(windows)]
 fn open_settings() {
+    use windows::core::{HSTRING, PCWSTR};
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    use windows::core::{HSTRING, PCWSTR};
 
     let console_exe = get_state(|s| s.console_exe.clone());
     std::thread::spawn(move || {
@@ -389,9 +381,11 @@ fn readd_tray_icon(hwnd: windows::Win32::Foundation::HWND) {
 
 #[cfg(windows)]
 fn load_tray_icon(exe_path: &std::path::Path) -> windows::Win32::UI::WindowsAndMessaging::HICON {
-    use windows::Win32::Foundation::HINSTANCE;
-    use windows::Win32::UI::WindowsAndMessaging::{LoadImageW, LR_DEFAULTSIZE, LR_LOADFROMFILE, IMAGE_ICON};
     use windows::core::HSTRING;
+    use windows::Win32::Foundation::HINSTANCE;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        LoadImageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE,
+    };
 
     let icon_path = exe_path.with_file_name("kbintake.ico");
     if icon_path.exists() {

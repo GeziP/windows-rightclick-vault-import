@@ -367,7 +367,11 @@ impl<'a> Repository<'a> {
             .map_err(Into::into)
     }
 
-    pub fn find_manifest_by_hash(&self, target_id: &str, sha256: &str) -> Result<Option<(String, String)>> {
+    pub fn find_manifest_by_hash(
+        &self,
+        target_id: &str,
+        sha256: &str,
+    ) -> Result<Option<(String, String)>> {
         self.conn
             .query_row(
                 "SELECT record_id, stored_path FROM manifest_records WHERE target_id = ?1 AND sha256 = ?2",

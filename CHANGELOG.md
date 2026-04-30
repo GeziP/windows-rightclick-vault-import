@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.0.0 (Unreleased)
+## v2.0.0 (2026-04-30)
 
 Major release adding template-based imports, Watch Mode, TUI settings, localization, and Windows 11 native context menu support.
 
