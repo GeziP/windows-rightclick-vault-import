@@ -39,6 +39,7 @@ enum InputMode {
     AddingTargetPath,
     AddingWatchPath,
     EditingTargetVault(usize),
+    EditingTargetSubfolder(usize),
     EditingWatchPath(usize),
     EditingWatchTarget(usize),
     EditingWatchExtensions(usize),
@@ -278,6 +279,9 @@ fn run_loop(
                 KeyCode::Char('f') => handle_toggle_frontmatter(ui),
                 KeyCode::Char('l') => handle_toggle_language(ui),
                 KeyCode::Char('e') => handle_edit(ui),
+                KeyCode::Char('o') if ui.active_tab == TabId::Targets => {
+                    handle_edit_subfolder(ui);
+                }
                 KeyCode::Char('t') => handle_edit_watch_field(ui, InputField::Target),
                 KeyCode::Char('x') => handle_edit_watch_field(ui, InputField::Extensions),
                 KeyCode::Char('b') => handle_edit_watch_field(ui, InputField::Debounce),
@@ -352,7 +356,7 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                 InputMode::AddingTargetName => {
                     let input_trimmed = input.trim().to_string();
                     if input_trimmed.is_empty() {
-                        ui.message = "Name cannot be empty".to_string();
+                        ui.message = tr("tui.name_empty", ui.lang()).to_string();
                         ui.input_mode = InputMode::Normal;
                         return true;
                     }
@@ -360,7 +364,7 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                         .chars()
                         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
                     {
-                        ui.message = "Name: only letters, numbers, '-', '_' allowed".to_string();
+                        ui.message = tr("tui.name_invalid", ui.lang()).to_string();
                         ui.input_mode = InputMode::Normal;
                         return true;
                     }
@@ -413,6 +417,24 @@ fn handle_text_input(ui: &mut SettingsUi, code: KeyCode) -> bool {
                         ui.config.targets[idx].obsidian_vault = None;
                     } else {
                         ui.config.targets[idx].obsidian_vault = Some(input.trim().to_string());
+                    }
+                    ui.pending_save = true;
+                    ui.input_mode = InputMode::Normal;
+                    ui.input_buffer.clear();
+                }
+                InputMode::EditingTargetSubfolder(idx) => {
+                    let idx = *idx;
+                    if input.trim().is_empty() {
+                        ui.config.targets[idx].default_subfolder = None;
+                    } else {
+                        let subfolder = input.trim().to_string();
+                        if std::path::Path::new(&subfolder).is_absolute() {
+                            ui.message = "Subfolder must be a relative path".to_string();
+                            ui.input_mode = InputMode::Normal;
+                            ui.input_buffer.clear();
+                            return true;
+                        }
+                        ui.config.targets[idx].default_subfolder = Some(subfolder);
                     }
                     ui.pending_save = true;
                     ui.input_mode = InputMode::Normal;
@@ -616,6 +638,21 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
                 },
             )
         }
+        InputMode::EditingTargetSubfolder(idx) => {
+            let current = ui.config.targets[*idx]
+                .default_subfolder
+                .as_deref()
+                .unwrap_or("")
+                .to_string();
+            (
+                format!("{}: ", tr("tui.prompt_subfolder", lang)),
+                if current.is_empty() {
+                    tr("tui.subfolder_edit_hint", lang).to_string()
+                } else {
+                    current
+                },
+            )
+        }
         InputMode::EditingWatchPath(idx) => (
             format!("{}: ", tr("tui.prompt_watch_path", lang)),
             ui.config.watch[*idx].path.display().to_string(),
@@ -656,6 +693,7 @@ fn render_input_overlay(frame: &mut ratatui::Frame, ui: &SettingsUi) {
         InputMode::AddingTargetPath => " Add Target (2/2) ",
         InputMode::AddingWatchPath => " Add Watch Path ",
         InputMode::EditingTargetVault(_) => " Edit Vault Name ",
+        InputMode::EditingTargetSubfolder(_) => " Edit Subfolder ",
         InputMode::EditingWatchPath(_) => " Edit Watch Path ",
         InputMode::EditingWatchTarget(_) => " Edit Watch Target ",
         InputMode::EditingWatchExtensions(_) => " Edit Extensions ",
@@ -712,6 +750,7 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
         Cell::from(tr("tui.status_col", lang)),
         Cell::from(tr("tui.path_col", lang)),
         Cell::from(tr("tui.vault_col", lang)),
+        Cell::from(tr("tui.subfolder_col", lang)),
     ])
     .style(Style::default().fg(Color::Yellow));
 
@@ -732,6 +771,10 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
                 Cell::from(target.status.clone()),
                 Cell::from(target.root_path.display().to_string()),
                 Cell::from(target.obsidian_vault.as_deref().unwrap_or("")),
+                Cell::from(target.default_subfolder.as_deref().unwrap_or("")),
+                Cell::from(target.status.clone()),
+                Cell::from(target.root_path.display().to_string()),
+                Cell::from(target.obsidian_vault.as_deref().unwrap_or("")),
             ]);
             if i == ui.selected_index {
                 row.style(Style::default().bg(Color::DarkGray).fg(Color::White))
@@ -748,6 +791,7 @@ fn render_targets(frame: &mut ratatui::Frame, ui: &SettingsUi, area: Rect) {
             Constraint::Length(15),
             Constraint::Length(10),
             Constraint::Min(15),
+            Constraint::Length(15),
             Constraint::Length(15),
         ],
     )
@@ -1329,6 +1373,19 @@ fn handle_edit(ui: &mut SettingsUi) {
         }
         _ => {}
     }
+}
+
+fn handle_edit_subfolder(ui: &mut SettingsUi) {
+    if ui.config.targets.is_empty() {
+        return;
+    }
+    let idx = ui.selected_index;
+    if idx >= ui.config.targets.len() {
+        return;
+    }
+    ui.input_mode = InputMode::EditingTargetSubfolder(idx);
+    ui.input_buffer.clear();
+    ui.message.clear();
 }
 
 fn is_path_input_mode(mode: &InputMode) -> bool {

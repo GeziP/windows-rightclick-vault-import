@@ -136,7 +136,7 @@ fn en(key: &str) -> &'static str {
         "tui.tab_templates" => "Templates",
         "tui.title" => "KBIntake Settings",
         "tui.unsaved" => "(modified)",
-        "tui.help_targets" => "[↑↓] Select  [e] Edit Vault  [d] Set Default  [a] Add  [r] Remove  [s] Save  [q] Quit",
+        "tui.help_targets" => "[↑↓] Select  [e] Edit Vault  [o] Edit Subfolder  [d] Set Default  [a] Add  [r] Remove  [s] Save  [q] Quit",
         "tui.help_import" => "[+/-] Size  [f] Frontmatter  [l] Language  [s] Save  [q] Quit",
         "tui.help_watch" => "[↑↓] Select  [e] Path  [t] Target  [x] Extensions  [b] Debounce  [p] Template  [a] Add  [s] Save  [q] Quit",
         "tui.help_templates" => "(read-only)  [s] Save  [q] Quit",
@@ -147,7 +147,7 @@ fn en(key: &str) -> &'static str {
         "tui.prompt_watch_extensions" => "Extensions (comma-separated, empty = all)",
         "tui.prompt_watch_debounce" => "Debounce seconds",
         "tui.prompt_watch_template" => "Template name (empty = none)",
-        "tui.desc_targets" => "Files are imported into the default (*) target vault. Press [e] to set Obsidian vault name for selected target.",
+        "tui.desc_targets" => "Files are imported into the default (*) target vault. Press [e] to set Obsidian vault name, [o] to set default subfolder.",
         "tui.desc_import" => "Configure global import behavior. Changes apply to all future imports.",
         "tui.desc_watch" => "Watched directories auto-import new files. Select a row and press the field key to edit.",
         "tui.desc_templates" => "Templates control subfolder, tags, and frontmatter for imports. Configured in config.toml.",
@@ -263,6 +263,16 @@ fn en(key: &str) -> &'static str {
 
         // -- Queue --
         "queue.not_found" => "{entity} not found: {id}",
+
+        // -- CLI misc --
+        "cli.undo_complete" => "Undo complete: {} deleted, {} skipped.",
+        "cli.cannot_remove_pending" => "Cannot remove target '{}' — {} pending job(s) exist. Process or cancel them first.",
+
+        // -- TUI subfolder editing --
+        "tui.prompt_subfolder" => "Default subfolder (relative path, empty to clear)",
+        "tui.subfolder_edit_hint" => "e.g. inbox, notes/incoming",
+        "tui.name_empty" => "Name cannot be empty",
+        "tui.name_invalid" => "Name: only letters, numbers, '-', '_' allowed",
 
         // -- Error prefix --
         "error.prefix" => "ERROR [{code}]: {err:#}",
@@ -396,7 +406,7 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "tui.tab_templates" => Some("模板"),
         "tui.title" => Some("KBIntake 设置"),
         "tui.unsaved" => Some("(未保存)"),
-        "tui.help_targets" => Some("[↑↓] 选择  [e] 编辑Vault  [d] 设为默认  [a] 添加  [r] 删除  [s] 保存  [q] 退出"),
+        "tui.help_targets" => Some("[↑↓] 选择  [e] 编辑Vault  [o] 编辑子文件夹  [d] 设为默认  [a] 添加  [r] 删除  [s] 保存  [q] 退出"),
         "tui.help_import" => Some("[+/-] 大小  [f] Frontmatter  [l] 语言  [s] 保存  [q] 退出"),
         "tui.help_watch" => Some("[↑↓] 选择  [e] 路径  [t] 目标  [x] 扩展名  [b] 防抖  [p] 模板  [a] 添加  [s] 保存  [q] 退出"),
         "tui.help_templates" => Some("(只读)  [s] 保存  [q] 退出"),
@@ -407,7 +417,7 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "tui.prompt_watch_extensions" => Some("扩展名（逗号分隔，空=全部）"),
         "tui.prompt_watch_debounce" => Some("防抖秒数"),
         "tui.prompt_watch_template" => Some("模板名称（空=无）"),
-        "tui.desc_targets" => Some("文件会导入到默认 (*) 目标库。选中一行后按 [e] 可设置该目标的 Obsidian vault 名称。"),
+        "tui.desc_targets" => Some("文件会导入到默认 (*) 目标库。按 [e] 设置 Obsidian vault 名称，按 [o] 设置默认子文件夹。"),
         "tui.desc_import" => Some("配置全局导入行为。修改后对所有后续导入生效。"),
         "tui.desc_watch" => Some("被监控的目录会自动导入新文件。选中一行后按对应字段按键即可编辑。"),
         "tui.desc_templates" => Some("模板控制导入时的子文件夹、标签和 frontmatter。需在 config.toml 中配置。"),
@@ -522,7 +532,17 @@ fn zh_cn(key: &str) -> Option<&'static str> {
         "processor.file_locked" => Some("文件在 {} 次重试后仍被锁定"),
 
         // -- Queue --
-        "queue.not_found" => Some("{entity} 未找到: {id}"),
+        "queue.not_found" => Some("未找到 {entity}: {id}"),
+
+        // -- CLI misc --
+        "cli.undo_complete" => Some("撤销完成: {} 已删除, {} 已跳过。"),
+        "cli.cannot_remove_pending" => Some("无法移除目标 '{}' — 有 {} 个待处理任务。请先处理或取消。"),
+
+        // -- TUI subfolder editing --
+        "tui.prompt_subfolder" => Some("默认子文件夹（相对路径，留空清除）"),
+        "tui.subfolder_edit_hint" => Some("例如: inbox, notes/incoming"),
+        "tui.name_empty" => Some("名称不能为空"),
+        "tui.name_invalid" => Some("名称只能包含字母、数字、'-' 和 '_'"),
 
         // -- Error prefix --
         "error.prefix" => Some("错误 [{code}]: {err:#}"),

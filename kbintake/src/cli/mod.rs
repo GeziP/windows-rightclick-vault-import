@@ -711,8 +711,10 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             ))?;
 
             println!(
-                "Undo complete: {} deleted, {} skipped (modified).",
-                deleted_count, skipped_modified_count
+                "{}",
+                tr("cli.undo_complete", lang)
+                    .replacen("{}", &deleted_count.to_string(), 1)
+                    .replacen("{}", &skipped_modified_count.to_string(), 1)
             );
             if skipped_modified_count > 0 {
                 Ok(exit_codes::PARTIAL_SUCCESS)
@@ -945,6 +947,107 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                 "Run: kbintake config set-target <path>",
                 lang,
             );
+        }
+    }
+
+    // Validate default_subfolder on all active targets
+    for target in &app.config.targets {
+        if !target.is_active() {
+            continue;
+        }
+        if let Some(subfolder) = &target.default_subfolder {
+            if subfolder.trim().is_empty() {
+                failed = true;
+                print_doctor_fail(
+                    "Subfolder",
+                    &format!("target '{}' has empty default_subfolder", target.target_id),
+                    "Edit config.toml and set a non-empty default_subfolder, or remove it",
+                    lang,
+                );
+            } else if std::path::Path::new(subfolder).is_absolute() {
+                failed = true;
+                print_doctor_fail(
+                    "Subfolder",
+                    &format!(
+                        "target '{}' default_subfolder must be relative: {}",
+                        target.target_id, subfolder
+                    ),
+                    "Edit config.toml and use a relative path like 'inbox'",
+                    lang,
+                );
+            } else {
+                let resolved = target.root_path.join(subfolder);
+                if resolved.exists() && !resolved.is_dir() {
+                    failed = true;
+                    print_doctor_fail(
+                        "Subfolder",
+                        &format!(
+                            "target '{}' subfolder exists but is not a directory: {}",
+                            target.target_id,
+                            resolved.display()
+                        ),
+                        "Remove the file or change default_subfolder in config.toml",
+                        lang,
+                    );
+                } else if !resolved.exists() {
+                    if fix {
+                        match std::fs::create_dir_all(&resolved) {
+                            Ok(()) => print_doctor_ok(
+                                "Subfolder",
+                                &format!(
+                                    "target '{}' created: {}",
+                                    target.target_id,
+                                    resolved.display()
+                                ),
+                                lang,
+                            ),
+                            Err(err) => {
+                                failed = true;
+                                print_doctor_fail(
+                                    "Subfolder",
+                                    &format!(
+                                        "target '{}' cannot create: {}",
+                                        target.target_id, err
+                                    ),
+                                    "Check permissions on the parent directory",
+                                    lang,
+                                );
+                            }
+                        }
+                    } else {
+                        print_doctor_warn(
+                            "Subfolder",
+                            &format!(
+                                "target '{}' subfolder does not exist: {}",
+                                target.target_id,
+                                resolved.display()
+                            ),
+                            "Run: kbintake doctor --fix to create it",
+                            lang,
+                        );
+                    }
+                } else {
+                    match crate::config::validate_target_root(&resolved) {
+                        Ok(()) => print_doctor_ok(
+                            "Subfolder",
+                            &format!("target '{}': {}", target.target_id, resolved.display()),
+                            lang,
+                        ),
+                        Err(err) => {
+                            failed = true;
+                            print_doctor_fail(
+                                "Subfolder",
+                                &format!(
+                                    "target '{}' subfolder not writable: {}",
+                                    target.target_id, err
+                                ),
+                                "Check folder permissions",
+                                lang,
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1192,9 +1295,10 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             let queued = repo.count_queued_items_by_target(&target_to_remove.target_id)?;
             if queued > 0 && !force {
                 anyhow::bail!(
-                    "Cannot remove target '{}' - {} pending job(s) exist. Process or cancel them first.",
-                    target_to_remove.name,
-                    queued
+                    "{}",
+                    tr("cli.cannot_remove_pending", lang)
+                        .replacen("{}", &target_to_remove.name, 1)
+                        .replacen("{}", &queued.to_string(), 1)
                 );
             }
             if queued > 0 {
@@ -1882,6 +1986,40 @@ pub fn run_doctor_checks(app: &App) -> Result<Vec<String>> {
         }
     }
 
+    for target in &app.config.targets {
+        if !target.is_active() {
+            continue;
+        }
+        if let Some(subfolder) = &target.default_subfolder {
+            if subfolder.trim().is_empty() {
+                issues.push(format!(
+                    "target '{}' has empty default_subfolder",
+                    target.target_id
+                ));
+            } else if std::path::Path::new(subfolder).is_absolute() {
+                issues.push(format!(
+                    "target '{}' default_subfolder must be relative",
+                    target.target_id
+                ));
+            } else {
+                let resolved = target.root_path.join(subfolder);
+                if resolved.exists() && !resolved.is_dir() {
+                    issues.push(format!(
+                        "target '{}' subfolder exists but is not a directory: {}",
+                        target.target_id,
+                        resolved.display()
+                    ));
+                } else if !resolved.exists() {
+                    issues.push(format!(
+                        "target '{}' subfolder does not exist: {}",
+                        target.target_id,
+                        resolved.display()
+                    ));
+                }
+            }
+        }
+    }
+
     if !crate::explorer::is_installed().unwrap_or(false) {
         issues.push(tr("explorer.install_unsupported", lang).to_string());
     }
@@ -2514,5 +2652,15 @@ mod tests {
     #[test]
     fn explorer_com_feasibility_command_executes() {
         handle_explorer(super::ExplorerCommands::ComFeasibility, "en").unwrap();
+    }
+
+    #[test]
+    fn run_doctor_checks_flags_missing_subfolder_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config.targets[0].default_subfolder = Some("nonexistent-subfolder".to_string());
+
+        let issues = super::run_doctor_checks(&app).unwrap();
+        assert!(issues.iter().any(|i| i.contains("nonexistent-subfolder")));
     }
 }
