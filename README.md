@@ -2,9 +2,9 @@
 
 KBIntake is a Windows-first local vault importer. It lets you send files and folders into a knowledge-base vault from PowerShell or from the Windows Explorer right-click menu, while keeping an auditable SQLite job history.
 
-Current release: `v2.0.0` (in development on branch `v2.0`)
+Current release: `v2.1.0`
 
-- Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0>
+- Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0>
 - Chinese README: [README.zh-CN.md](README.zh-CN.md)
 
 ## What It Is For
@@ -23,7 +23,7 @@ KBIntake does not require a cloud service. Configuration, queue state, manifests
 
 ### Recommended
 
-1. Open the [v1.0.0 release page](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0).
+1. Open the [v2.1.0 release page](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0).
 2. Download `KBIntake-Setup.exe`.
 3. Run the installer.
 4. Open a new PowerShell window and run:
@@ -72,6 +72,50 @@ kbintake doctor --fix
 kbintake import --process C:\path\to\note.md
 kbintake jobs list
 ```
+
+## Obsidian Integration
+
+KBIntake can import files directly into your Obsidian vault and auto-open notes after import.
+
+### Setup
+
+1. Add your Obsidian vault as a KBIntake target:
+
+```powershell
+kbintake targets add obsidian "C:\Users\<you>\Documents\YourVaultName"
+kbintake targets set-default obsidian
+```
+
+2. Edit `%LOCALAPPDATA%\kbintake\config.toml` — add `obsidian_vault` to the target and enable auto-open:
+
+```toml
+[[targets]]
+target_id = "obsidian"
+name = "obsidian"
+root_path = 'C:\Users\<you>\Documents\YourVaultName'
+status = "active"
+obsidian_vault = "YourVaultName"
+
+[import]
+auto_open_obsidian = true
+```
+
+`obsidian_vault` must match the vault name shown in Obsidian's sidebar.
+
+### Usage
+
+```powershell
+# Import and open in Obsidian
+kbintake import note.md --process --open
+
+# Import without opening
+kbintake import note.md --process
+
+# Import from clipboard
+kbintake import --clipboard --process
+```
+
+On first run, KBIntake generates default templates. Imported `.md` files go to `vault/notes/`, PDFs to `vault/documents/`, code files to `vault/snippets/`, etc. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full template list.
 
 ## Features
 

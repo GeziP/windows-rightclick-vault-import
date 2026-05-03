@@ -2,9 +2,9 @@
 
 KBIntake 是一个面向 Windows 的本地知识库导入工具。它可以把文件或文件夹从 PowerShell 或 Windows Explorer 右键菜单导入到本地 vault，并用 SQLite 记录每一次导入、去重、失败和撤销信息。
 
-当前版本：`v2.0.0`（开发中，分支 `v2.0`）
+当前版本：`v2.1.0`
 
-- 下载地址：<https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0>
+- 下载地址：<https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0>
 - 英文 README：[README.md](README.md)
 
 ## 这个项目解决什么问题
@@ -35,7 +35,7 @@ C:\Users\<你>\Documents\KBIntakeVault
 
 ### 推荐方式
 
-1. 打开 [v1.0.0 Release 页面](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0)。
+1. 打开 [v2.1.0 Release 页面](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0)。
 2. 下载 `KBIntake-Setup.exe`。
 3. 运行安装包。
 4. 打开新的 PowerShell，执行：
@@ -98,6 +98,50 @@ kbintake doctor --fix
 kbintake import --process C:\path\to\note.md
 kbintake jobs list
 ```
+
+## Obsidian 集成
+
+KBIntake 可以把文件直接导入到 Obsidian vault，并在导入后自动打开笔记。
+
+### 配置步骤
+
+1. 添加 Obsidian vault 为 KBIntake 目标：
+
+```powershell
+kbintake targets add obsidian "C:\Users\<你>\Documents\你的Vault名称"
+kbintake targets set-default obsidian
+```
+
+2. 编辑 `%LOCALAPPDATA%\kbintake\config.toml`，给目标添加 `obsidian_vault` 并开启自动打开：
+
+```toml
+[[targets]]
+target_id = "obsidian"
+name = "obsidian"
+root_path = 'C:\Users\<你>\Documents\你的Vault名称'
+status = "active"
+obsidian_vault = "你的Vault名称"
+
+[import]
+auto_open_obsidian = true
+```
+
+`obsidian_vault` 必须和 Obsidian 侧边栏显示的 vault 名称一致。
+
+### 使用方法
+
+```powershell
+# 导入并在 Obsidian 中打开
+kbintake import 笔记.md --process --open
+
+# 导入但不打开
+kbintake import 笔记.md --process
+
+# 从剪贴板导入
+kbintake import --clipboard --process
+```
+
+首次运行时，KBIntake 会自动生成默认模板。导入的 `.md` 文件会进入 `vault/notes/`，PDF 进入 `vault/documents/`，代码文件进入 `vault/snippets/` 等。完整模板列表见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
 
 ## 已有功能
 
