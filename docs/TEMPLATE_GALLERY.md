@@ -2,6 +2,8 @@
 
 Ready-to-use import templates for common knowledge management scenarios. Copy any template into your `config.toml` to get started.
 
+> **Note:** KBIntake ships with 5 built-in default templates (inbox, notes, documents, media, code) that are generated automatically on first run. The templates below are more specialized alternatives for specific workflows.
+
 ## Quick Reference
 
 ### Built-in Variables

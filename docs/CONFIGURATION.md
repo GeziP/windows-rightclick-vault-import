@@ -12,6 +12,20 @@ Use this command to print the current effective config:
 kbintake config show
 ```
 
+## Default Templates
+
+On first run (when `config.toml` does not exist), KBIntake generates 5 built-in templates and 4 routing rules:
+
+| Template | Subfolder | Matches |
+|----------|-----------|---------|
+| `inbox` | `inbox/` | Fallback for unmatched files |
+| `notes` | `notes/` | `.md`, `.txt`, `.org`, `.rst` |
+| `documents` | `documents/` | `.pdf`, `.docx`, `.xlsx`, `.pptx`, `.doc`, `.xls`, `.ppt` |
+| `media` | `assets/media/` | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.mp4`, `.mp3` |
+| `code` | `snippets/` | `.py`, `.rs`, `.js`, `.ts`, `.go`, `.java`, `.c`, `.cpp`, `.h`, `.sh`, `.sql`, `.rb`, `.php` |
+
+Existing `config.toml` files are never overwritten. To reset to defaults, delete `config.toml` and run any `kbintake` command.
+
 ## Full Example
 
 ```toml

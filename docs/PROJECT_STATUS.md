@@ -125,6 +125,13 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
 - GHA validation workflow for registry operations
 - Validated on Windows 11 physical hardware
 
+#### Default Templates (v2.1.0)
+
+- 5 built-in templates (inbox, notes, documents, media, code) generated on first run
+- 4 routing rules matching common file extensions to templates
+- `inbox` as fallback for unmatched files
+- Existing configs untouched; reset by deleting `config.toml`
+
 #### Post-handoff Additions (no epic number)
 
 - **System Tray Icon** (`kbintakew.exe tray`):
@@ -152,7 +159,7 @@ cargo build --release --locked --bins          # kbintake + kbintakew
 
 ## Release History
 
-- `v2.1.0` (2026-05-03) — Fix `--tags` frontmatter injection, tray autostart in installer, winget 2.0.0 manifest
+- `v2.1.0` (2026-05-03) — Fix `--tags` frontmatter injection, tray autostart in installer, winget 2.0.0 manifest, default templates for first-run experience
 - `v2.0.0` (2026-04-30) — Templates, Watch Mode, TUI, localization, Win11 context menu, system tray
 - `v1.0.1` — Static CRT, installer validation workflow
 - `v1.0.0` — Initial release
