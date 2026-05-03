@@ -54,7 +54,7 @@ date = "{{imported_at_date}}"
 sha256 = "{{sha256}}"
 
 [[routing_rules]]
-extension = ".pdf"
+extension = "pdf"
 source_folder = "Downloads"
 template = "research-paper"
 ```
@@ -79,7 +79,7 @@ date = "{{imported_at_date}}"
 source = "{{source_path}}"
 
 [[routing_rules]]
-extension = [".docx", ".md", ".txt"]
+extension = ["docx", "md", "txt"]
 file_name_contains = "meeting"
 template = "meeting-notes"
 ```
@@ -129,7 +129,7 @@ note
 '''
 
 [[routing_rules]]
-extension = [".epub", ".md", ".txt"]
+extension = ["epub", "md", "txt"]
 template = "book-notes"
 ```
 
@@ -151,7 +151,7 @@ language = "{{file_ext}}"
 source = "{{source_path}}"
 
 [[routing_rules]]
-extension = [".py", ".rs", ".js", ".ts", ".sh", ".sql", ".go", ".java", ".c", ".cpp"]
+extension = ["py", "rs", "js", "ts", "sh", "sql", "go", "java", "c", "cpp"]
 template = "code-snippet"
 ```
 
@@ -178,7 +178,7 @@ large-image -- consider compressing before embedding
 '''
 
 [[routing_rules]]
-extension = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]
+extension = ["png", "jpg", "jpeg", "gif", "webp", "svg"]
 template = "image-screenshot"
 ```
 

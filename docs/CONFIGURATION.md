@@ -55,12 +55,12 @@ base_template = "notes"
 subfolder = "archive/pdf"
 
 [[routing_rules]]
-extensions = [".md", ".txt"]
+extension = ["md", "txt"]
 target = "default"
 template = "notes"
 
 [[routing_rules]]
-extensions = [".pdf"]
+extension = "pdf"
 file_size_range = [0, 104857600]
 target = "default"
 template = "pdf-archive"
@@ -253,7 +253,7 @@ Multi-condition routing rules with template binding.
 
 Fields:
 
-- `extensions`: list of file extensions to match (case-insensitive)
+- `extension`: string or list of file extensions to match, without dots (case-insensitive)
 - `source_folder`: match files from a specific directory
 - `file_name_contains`: match files whose name contains this string
 - `file_size_range`: `[min_bytes, max_bytes]` range
@@ -264,7 +264,7 @@ Example:
 
 ```toml
 [[routing_rules]]
-extensions = [".md"]
+extension = "md"
 target = "notes"
 template = "notes"
 ```

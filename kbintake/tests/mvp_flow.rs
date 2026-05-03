@@ -18,7 +18,11 @@ fn kbintake_command(app_data_dir: &std::path::Path) -> Command {
 }
 
 fn bootstrap_temp_app(temp: &tempfile::TempDir) -> App {
-    App::bootstrap_in(temp.path().join("appdata")).unwrap()
+    let mut app = App::bootstrap_in(temp.path().join("appdata")).unwrap();
+    app.config.templates.clear();
+    app.config.routing_rules.clear();
+    app.config.save().unwrap();
+    app
 }
 
 #[test]
@@ -1526,7 +1530,7 @@ fn cli_import_dry_run_json_outputs_preview_array() {
     assert_eq!(value[0]["action"], "copy");
     assert_eq!(value[0]["source"], source.display().to_string());
     assert_eq!(value[0]["target"], "default");
-    assert!(value[0]["matched_rule_template"].is_null());
+    assert_eq!(value[0]["matched_rule_template"], "notes");
     assert!(value[0]["destination"]
         .as_str()
         .unwrap()

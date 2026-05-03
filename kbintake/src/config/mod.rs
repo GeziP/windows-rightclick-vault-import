@@ -173,13 +173,157 @@ impl AppConfig {
                 watch_in_service: false,
             },
             routing: Vec::new(),
-            templates: Vec::new(),
-            routing_rules: Vec::new(),
+            templates: Self::default_templates(),
+            routing_rules: Self::default_routing_rules(),
             watch: Vec::new(),
         };
 
         config.save()?;
         Ok(config)
+    }
+
+    fn frontmatter_table(pairs: &[(&str, &str)]) -> toml::Table {
+        let mut table = toml::Table::new();
+        for (k, v) in pairs {
+            table.insert(k.to_string(), toml::Value::String(v.to_string()));
+        }
+        table
+    }
+
+    fn default_templates() -> Vec<TemplateConfig> {
+        vec![
+            TemplateConfig {
+                name: "inbox".to_string(),
+                base_template: None,
+                subfolder: Some("inbox".to_string()),
+                tags: vec!["inbox".to_string()],
+                frontmatter: Self::frontmatter_table(&[
+                    ("type", "capture"),
+                    ("imported_at", "{{imported_at}}"),
+                ]),
+            },
+            TemplateConfig {
+                name: "notes".to_string(),
+                base_template: None,
+                subfolder: Some("notes".to_string()),
+                tags: vec!["note".to_string()],
+                frontmatter: Self::frontmatter_table(&[
+                    ("type", "note"),
+                    ("created", "{{imported_at_date}}"),
+                ]),
+            },
+            TemplateConfig {
+                name: "documents".to_string(),
+                base_template: None,
+                subfolder: Some("documents".to_string()),
+                tags: vec!["document".to_string()],
+                frontmatter: Self::frontmatter_table(&[
+                    ("type", "document"),
+                    ("source", "{{source_path}}"),
+                    ("imported", "{{imported_at_date}}"),
+                ]),
+            },
+            TemplateConfig {
+                name: "media".to_string(),
+                base_template: None,
+                subfolder: Some("assets/media".to_string()),
+                tags: vec!["media".to_string()],
+                frontmatter: Self::frontmatter_table(&[
+                    ("type", "media"),
+                    ("file", "{{file_name}}{{file_ext}}"),
+                    ("size_kb", "{{file_size_kb}}"),
+                ]),
+            },
+            TemplateConfig {
+                name: "code".to_string(),
+                base_template: None,
+                subfolder: Some("snippets".to_string()),
+                tags: vec!["code".to_string()],
+                frontmatter: Self::frontmatter_table(&[
+                    ("type", "code"),
+                    ("language", "{{file_ext}}"),
+                    ("source", "{{source_path}}"),
+                ]),
+            },
+        ]
+    }
+
+    fn default_routing_rules() -> Vec<RoutingRuleV2> {
+        vec![
+            RoutingRuleV2 {
+                extension: Some(StringList::Many(vec![
+                    "md".to_string(),
+                    "txt".to_string(),
+                    "org".to_string(),
+                    "rst".to_string(),
+                ])),
+                source_folder: None,
+                file_name_contains: None,
+                file_size_kb_gt: None,
+                file_size_kb_lt: None,
+                template: "notes".to_string(),
+                target: None,
+            },
+            RoutingRuleV2 {
+                extension: Some(StringList::Many(vec![
+                    "pdf".to_string(),
+                    "docx".to_string(),
+                    "xlsx".to_string(),
+                    "pptx".to_string(),
+                    "doc".to_string(),
+                    "xls".to_string(),
+                    "ppt".to_string(),
+                ])),
+                source_folder: None,
+                file_name_contains: None,
+                file_size_kb_gt: None,
+                file_size_kb_lt: None,
+                template: "documents".to_string(),
+                target: None,
+            },
+            RoutingRuleV2 {
+                extension: Some(StringList::Many(vec![
+                    "png".to_string(),
+                    "jpg".to_string(),
+                    "jpeg".to_string(),
+                    "gif".to_string(),
+                    "webp".to_string(),
+                    "svg".to_string(),
+                    "bmp".to_string(),
+                    "mp4".to_string(),
+                    "mp3".to_string(),
+                ])),
+                source_folder: None,
+                file_name_contains: None,
+                file_size_kb_gt: None,
+                file_size_kb_lt: None,
+                template: "media".to_string(),
+                target: None,
+            },
+            RoutingRuleV2 {
+                extension: Some(StringList::Many(vec![
+                    "py".to_string(),
+                    "rs".to_string(),
+                    "js".to_string(),
+                    "ts".to_string(),
+                    "go".to_string(),
+                    "java".to_string(),
+                    "c".to_string(),
+                    "cpp".to_string(),
+                    "h".to_string(),
+                    "sh".to_string(),
+                    "sql".to_string(),
+                    "rb".to_string(),
+                    "php".to_string(),
+                ])),
+                source_folder: None,
+                file_name_contains: None,
+                file_size_kb_gt: None,
+                file_size_kb_lt: None,
+                template: "code".to_string(),
+                target: None,
+            },
+        ]
     }
 
     pub fn default_target(&self) -> Result<Target> {
@@ -1062,6 +1206,8 @@ target = "archive"
     fn template_for_path_prefers_first_matching_routing_rule() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.templates.clear();
+        config.routing_rules.clear();
         config.templates.push(TemplateConfig {
             name: "default-template".to_string(),
             base_template: None,
@@ -1113,6 +1259,8 @@ target = "archive"
     fn template_for_path_falls_back_to_first_template_without_match() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.templates.clear();
+        config.routing_rules.clear();
         config.templates.push(TemplateConfig {
             name: "default-template".to_string(),
             base_template: None,
@@ -1148,6 +1296,8 @@ target = "archive"
     fn target_for_path_with_size_prefers_matching_v2_rule_target() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.templates.clear();
+        config.routing_rules.clear();
         config
             .add_target("archive", temp.path().join("archive"))
             .unwrap();
@@ -1200,6 +1350,8 @@ target = "archive"
     fn route_selection_returns_matched_v2_template_name() {
         let temp = tempfile::tempdir().unwrap();
         let mut config = AppConfig::load_or_init_in(temp.path().join("appdata")).unwrap();
+        config.templates.clear();
+        config.routing_rules.clear();
         config.routing_rules.push(RoutingRuleV2 {
             extension: Some(StringList::One("pdf".to_string())),
             source_folder: None,
