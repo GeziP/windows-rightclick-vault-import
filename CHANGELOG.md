@@ -1,5 +1,18 @@
 # Changelog
 
+## v2.1.0 (2026-05-03)
+
+Patch release fixing CLI tag injection and adding optional tray auto-start to the installer.
+
+### Fixed
+
+- Fix `--tags` not written to file frontmatter when no template matches the source file. Tags are now always injected into markdown frontmatter when provided via CLI, even without a template.
+
+### Changed
+
+- NSIS installer now offers an optional checkbox to start KBIntake tray on Windows login (HKCU\Run entry for `kbintakew.exe tray --minimized`).
+- Winget manifest updated to 2.0.0 with static CRT (removed VC++ Redistributable dependency).
+
 ## v2.0.0 (2026-04-30)
 
 Major release adding template-based imports, Watch Mode, TUI settings, localization, and Windows 11 native context menu support.

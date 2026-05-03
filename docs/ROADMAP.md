@@ -4,10 +4,10 @@ This roadmap tracks KBIntake after the `v1.0.0` Windows release.
 
 ## Current Release
 
-`v1.0.0` is available from GitHub Releases:
+`v2.1.0` is the latest release. Previous releases: `v2.0.0`, `v1.0.1`, `v1.0.0`.
 
 ```text
-https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
 ```
 
 The release includes:
@@ -131,12 +131,11 @@ Remaining for v2.0 release:
 
 ## Planned Work
 
-- v2.0 release: installer update, version bump, release notes
-- Windows 11 COM DLL go/no-go for v2.0
+- Windows 11 COM DLL go/no-go decision
 - Documentation pass (template gallery, config reference, CONTRIBUTING)
-- winget publication through `winget install GeziP.KBIntake` after PR merge
-- Authenticode code signing
-- installer option to install/start the Windows Service and tray
+- winget publication through `winget install GeziP.KBIntake` after v2.0.0 PR merge
+- Authenticode code signing (requires certificate purchase)
+- installer option to install/start the Windows Service (requires admin elevation)
 - reboot-resume validation for service mode
 
 ## Known Limitations

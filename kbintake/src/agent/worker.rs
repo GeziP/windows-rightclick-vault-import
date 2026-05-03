@@ -124,6 +124,31 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         }
     };
 
+    // When no template matches but CLI tags are provided, create a minimal
+    // RenderedTemplate so the tags are still injected into frontmatter.
+    let rendered_template = rendered_template.or_else(|| {
+        if cli_tags.is_empty() {
+            None
+        } else {
+            let mut frontmatter = toml::Table::new();
+            frontmatter.insert(
+                "tags".to_string(),
+                toml::Value::Array(
+                    cli_tags
+                        .iter()
+                        .map(|t| toml::Value::String(t.clone()))
+                        .collect(),
+                ),
+            );
+            Some(template::RenderedTemplate {
+                name: String::new(),
+                subfolder: None,
+                tags: cli_tags,
+                frontmatter,
+            })
+        }
+    });
+
     if let Some((existing_record_id, stored_path)) =
         deduper::find_duplicate_record(&repo, &item.target_id, &hash)?
     {

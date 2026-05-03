@@ -6,7 +6,7 @@
 !define APP_EXE "kbintake.exe"
 !define APP_GUI_EXE "kbintakew.exe"
 !define APP_ICON "kbintake.ico"
-!define APP_VERSION "2.0.0"
+!define APP_VERSION "2.1.0"
 !define POWERSHELL_EXE "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
 
 Name "${APP_NAME}"
@@ -52,9 +52,20 @@ Section "Install"
   WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoRepair" 1
 SectionEnd
 
+; Optional: start KBIntake tray on Windows login
+Section /o "Start KBIntake tray on Windows login" SEC_TRAY_AUTOSTART
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "KBIntake" '"$INSTDIR\${APP_GUI_EXE}" tray --minimized'
+SectionEnd
+
+; NOTE: KBIntake background service requires Administrator to install.
+; Run manually: kbintake service install && kbintake service start
+
 Section "Uninstall"
   IfFileExists "$INSTDIR\${APP_EXE}" 0 +2
     ExecWait '"$INSTDIR\${APP_EXE}" explorer uninstall'
+
+  ; Remove tray autostart if it was set
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "KBIntake"
 
   Call un.RemoveInstallDirFromPath
 
