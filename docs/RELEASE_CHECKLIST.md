@@ -23,7 +23,7 @@ Use this checklist for KBIntake releases. Adapt the version numbers as needed.
 
 ## Automated Checks
 
-Run from `kbintake/`:
+Run from the repo root:
 
 ```powershell
 cargo fmt --all -- --check

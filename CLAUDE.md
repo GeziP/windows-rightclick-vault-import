@@ -7,11 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **KBIntake** is a Windows-first local vault importer CLI (Rust 2021). It imports files/folders into a knowledge-base vault via PowerShell or Windows Explorer right-click context menu, with SQLite-backed job history, SHA-256 deduplication, and toast notifications.
 
 - Current branch: `v2.0` (template system, routing v2, Watch Mode, Win11 native context menu, system tray)
-- Current release: `v2.0.0`
+- Current release: `v2.1.0`
 
 ## Build, Test, and Development Commands
 
-All Rust commands run from `kbintake/`:
+All Rust commands run from the repo root (workspace root contains `Cargo.toml` and `Cargo.lock`):
 
 ```powershell
 cargo build --release --locked --bins     # Release build
@@ -24,8 +24,8 @@ cargo build --locked                       # Debug build
 Installer build (from repo root, requires NSIS):
 ```powershell
 New-Item -ItemType Directory -Force .\dist | Out-Null
-Copy-Item .\kbintake\target\release\kbintake.exe .\dist\kbintake.exe -Force
-Copy-Item .\kbintake\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
+Copy-Item .\target\release\kbintake.exe .\dist\kbintake.exe -Force
+Copy-Item .\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
 Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
 & "C:\Program Files (x86)\NSIS\makensis.exe" .\installer\kbintake.nsi
 ```

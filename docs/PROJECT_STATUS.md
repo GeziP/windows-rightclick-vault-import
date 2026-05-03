@@ -1,15 +1,15 @@
 # KBIntake Project Status
 
-Last updated: 2026-04-29
+Last updated: 2026-05-03
 
 ## Summary
 
-KBIntake v2.0 is in final development on branch `v2.0`. All planned features across Phase 1–3 are implemented, plus post-handoff additions (system tray, directory structure preservation, stale manifest handling). Remaining work is documentation, physical machine validation of the Windows 11 COM DLL, and release preparation.
+KBIntake v2.1.0 is the latest release on branch `v2.0`. All planned features across Phase 1–3 are implemented, plus post-handoff additions (system tray, directory structure preservation, stale manifest handling). v2.1.0 fixed `--tags` frontmatter injection and added tray auto-start to the installer.
 
-The current stable release remains `v1.0.0`:
+Current release:
 
 ```text
-https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
 ```
 
 ## What Is Complete
@@ -144,18 +144,25 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
 ## Validation State
 
 ```powershell
-cargo test --locked                            # 170 tests (118 unit + 52 integration)
+cargo test --locked                            # 171 tests (119 unit + 52 integration)
 cargo clippy --all-targets --all-features -- -D warnings  # clean
 cargo fmt --all -- --check                     # clean
-cargo build --release --locked --bins          # kbintake + kbintake-com
+cargo build --release --locked --bins          # kbintake + kbintakew
 ```
+
+## Release History
+
+- `v2.1.0` (2026-05-03) — Fix `--tags` frontmatter injection, tray autostart in installer, winget 2.0.0 manifest
+- `v2.0.0` (2026-04-30) — Templates, Watch Mode, TUI, localization, Win11 context menu, system tray
+- `v1.0.1` — Static CRT, installer validation workflow
+- `v1.0.0` — Initial release
 
 ## Open Work
 
 ### Windows 11 Physical Validation (#57)
 
 - COM DLL validated on physical hardware: install, top-level menu, icon, import, uninstall
-- Remaining: go/no-go decision for v2.0 vs v2.1
+- Remaining: go/no-go decision
 
 ### Documentation (#67)
 
@@ -163,14 +170,6 @@ cargo build --release --locked --bins          # kbintake + kbintake-com
 - Template gallery docs pending (#69, #73)
 - Config.toml reference docs pending (#68, #72)
 - CONTRIBUTING.md pending (#70)
-- Release checklist and CHANGELOG format (#71)
-
-### Release Preparation (#56)
-
-- Version bump to `2.0.0`
-- Installer update for new assets
-- Winget manifest update for `2.0.0`
-- Release notes
 
 ### Winget Publication (#43)
 
