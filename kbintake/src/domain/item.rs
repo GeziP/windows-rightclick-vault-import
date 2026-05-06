@@ -22,6 +22,7 @@ pub struct ItemJob {
     pub error_message: Option<String>,
     pub cli_tags: Option<String>,
     pub import_subfolder: Option<String>,
+    pub template_name: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -55,6 +56,7 @@ impl ItemJob {
             error_message: None,
             cli_tags: None,
             import_subfolder: None,
+            template_name: None,
             created_at: now,
             updated_at: now,
         }

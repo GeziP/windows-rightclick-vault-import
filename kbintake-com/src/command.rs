@@ -99,6 +99,7 @@ unsafe extern "system" fn cmd_release(this: *mut c_void) -> u32 {
         - 1;
     if new_count == 0 {
         drop(Box::from_raw(this as *mut ExplorerCommandHandler));
+        crate::server::lock_count::object_release();
     }
     new_count
 }
