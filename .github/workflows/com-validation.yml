@@ -35,25 +35,22 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: kbintake-com -> target
+          workspaces: kbintake -> target
 
       - name: Lint kbintake-com
-        working-directory: kbintake-com
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy -p kbintake-com --all-targets --locked -- -D warnings
 
       - name: Build kbintake-com DLL and reg tool
-        working-directory: kbintake-com
-        run: cargo build --locked --release
+        run: cargo build --locked --release -p kbintake-com
 
       - name: Run unit tests
-        working-directory: kbintake-com
-        run: cargo test --locked
+        run: cargo test --locked -p kbintake-com
 
       - name: Verify build artifacts exist
         shell: pwsh
         run: |
-          $dll = "kbintake-com/target/release/kbintake_com.dll"
-          $reg = "kbintake-com/target/release/kbintake-com-reg.exe"
+          $dll = "target/release/kbintake_com.dll"
+          $reg = "target/release/kbintake-com-reg.exe"
           if (-not (Test-Path $dll)) { Write-Error "DLL not found: $dll"; exit 1 }
           if (-not (Test-Path $reg)) { Write-Error "Reg tool not found: $reg"; exit 1 }
           Write-Host "DLL: $dll"
@@ -62,20 +59,20 @@ jobs:
       - name: Check initial status (should be unregistered)
         shell: pwsh
         run: |
-          $output = & kbintake-com/target/release/kbintake-com-reg.exe status
+          $output = & target/release/kbintake-com-reg.exe status
           Write-Host $output
           if ($output -match "not registered") {
             Write-Host "PASS: Initial state is unregistered"
           } else {
             # May be leftover from a previous run — clean up first
             Write-Host "WARN: Unexpected initial state, cleaning up"
-            & kbintake-com/target/release/kbintake-com-reg.exe uninstall
+            & target/release/kbintake-com-reg.exe uninstall
           }
 
       - name: Register COM DLL
         shell: pwsh
         run: |
-          & kbintake-com/target/release/kbintake-com-reg.exe install --dll (Resolve-Path "kbintake-com/target/release/kbintake_com.dll")
+          & target/release/kbintake-com-reg.exe install --dll (Resolve-Path "target/release/kbintake_com.dll")
 
       - name: Verify registration (CLSID key exists)
         shell: pwsh
@@ -145,7 +142,7 @@ jobs:
       - name: Verify status command (should show registered)
         shell: pwsh
         run: |
-          $output = & kbintake-com/target/release/kbintake-com-reg.exe status
+          $output = & target/release/kbintake-com-reg.exe status
           Write-Host $output
           if ($output -match "registered" -and $output -notmatch "not registered") {
             Write-Host "PASS: Status shows registered"
@@ -157,7 +154,7 @@ jobs:
       - name: Unregister COM DLL
         shell: pwsh
         run: |
-          & kbintake-com/target/release/kbintake-com-reg.exe uninstall
+          & target/release/kbintake-com-reg.exe uninstall
 
       - name: Verify cleanup (CLSID key removed)
         shell: pwsh
@@ -182,7 +179,7 @@ jobs:
       - name: Verify status command (should show unregistered)
         shell: pwsh
         run: |
-          $output = & kbintake-com/target/release/kbintake-com-reg.exe status
+          $output = & target/release/kbintake-com-reg.exe status
           Write-Host $output
           if ($output -match "not registered") {
             Write-Host "PASS: Status shows not registered after uninstall"
