@@ -4,10 +4,10 @@ This roadmap tracks KBIntake after the `v1.0.0` Windows release.
 
 ## Current Release
 
-`v2.1.0` is the latest release. Previous releases: `v2.0.0`, `v1.0.1`, `v1.0.0`.
+`v2.1.1` is the latest release. Previous releases: `v2.0.0`, `v1.0.1`, `v1.0.0`.
 
 ```text
-https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.1
 ```
 
 The release includes:

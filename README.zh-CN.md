@@ -2,9 +2,9 @@
 
 KBIntake 是一个面向 Windows 的本地知识库导入工具。它可以把文件或文件夹从 PowerShell 或 Windows Explorer 右键菜单导入到本地 vault，并用 SQLite 记录每一次导入、去重、失败和撤销信息。
 
-当前版本：`v2.1.0`
+当前版本：`v2.1.1`
 
-- 下载地址：<https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0>
+- 下载地址：<https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.1>
 - 英文 README：[README.md](README.md)
 
 ## 这个项目解决什么问题
@@ -35,7 +35,7 @@ C:\Users\<你>\Documents\KBIntakeVault
 
 ### 推荐方式
 
-1. 打开 [v2.1.0 Release 页面](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0)。
+1. 打开 [v2.1.1 Release 页面](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.1)。
 2. 下载 `KBIntake-Setup.exe`。
 3. 运行安装包。
 4. 打开新的 PowerShell，执行：

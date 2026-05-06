@@ -2,9 +2,9 @@
 
 KBIntake is a Windows-first local vault importer. It lets you send files and folders into a knowledge-base vault from PowerShell or from the Windows Explorer right-click menu, while keeping an auditable SQLite job history.
 
-Current release: `v2.1.0`
+Current release: `v2.1.1`
 
-- Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0>
+- Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.1>
 - Chinese README: [README.zh-CN.md](README.zh-CN.md)
 
 ## What It Is For
@@ -23,7 +23,7 @@ KBIntake does not require a cloud service. Configuration, queue state, manifests
 
 ### Recommended
 
-1. Open the [v2.1.0 release page](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0).
+1. Open the [v2.1.1 release page](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.1).
 2. Download `KBIntake-Setup.exe`.
 3. Run the installer.
 4. Open a new PowerShell window and run:

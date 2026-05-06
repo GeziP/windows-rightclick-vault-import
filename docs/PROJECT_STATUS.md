@@ -1,15 +1,15 @@
 # KBIntake Project Status
 
-Last updated: 2026-05-03
+Last updated: 2026-05-06
 
 ## Summary
 
-KBIntake v2.1.0 is the latest release on branch `v2.0`. All planned features across Phase 1–3 are implemented, plus post-handoff additions (system tray, directory structure preservation, stale manifest handling). v2.1.0 fixed `--tags` frontmatter injection and added tray auto-start to the installer.
+KBIntake v2.1.1 is the latest release on branch `v2.0`. All planned features across Phase 1–3 are implemented, plus post-handoff additions (system tray, directory structure preservation, stale manifest handling). v2.1.1 fixed `--tags` frontmatter injection and added tray auto-start to the installer.
 
 Current release:
 
 ```text
-https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.1
 ```
 
 ## What Is Complete
@@ -125,7 +125,7 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
 - GHA validation workflow for registry operations
 - Validated on Windows 11 physical hardware
 
-#### Default Templates (v2.1.0)
+#### Default Templates (v2.1.1)
 
 - 5 built-in templates (inbox, notes, documents, media, code) generated on first run
 - 4 routing rules matching common file extensions to templates
@@ -159,7 +159,7 @@ cargo build --release --locked --bins          # kbintake + kbintakew
 
 ## Release History
 
-- `v2.1.0` (2026-05-03) — Fix `--tags` frontmatter injection, tray autostart in installer, winget 2.0.0 manifest, default templates for first-run experience
+- `v2.1.1` (2026-05-03) — Fix `--tags` frontmatter injection, tray autostart in installer, winget 2.0.0 manifest, default templates for first-run experience
 - `v2.0.0` (2026-04-30) — Templates, Watch Mode, TUI, localization, Win11 context menu, system tray
 - `v1.0.1` — Static CRT, installer validation workflow
 - `v1.0.0` — Initial release

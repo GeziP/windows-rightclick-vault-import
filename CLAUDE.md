@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **KBIntake** is a Windows-first local vault importer CLI (Rust 2021). It imports files/folders into a knowledge-base vault via PowerShell or Windows Explorer right-click context menu, with SQLite-backed job history, SHA-256 deduplication, and toast notifications.
 
 - Current branch: `v2.0` (template system, routing v2, Watch Mode, Win11 native context menu, system tray)
-- Current release: `v2.1.0`
+- Current release: `v2.1.1`
 
 ## Build, Test, and Development Commands
 
