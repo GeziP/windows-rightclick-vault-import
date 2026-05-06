@@ -42,7 +42,7 @@ fn main() {
 
 #[cfg(windows)]
 fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
-    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER};
     use winreg::RegKey;
 
     let dll_path = dll.unwrap_or_else(find_default_dll);
@@ -51,33 +51,59 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
         std::process::exit(1);
     }
 
+    // Try HKCR first (admin), fall back to HKCU (no admin needed).
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-    let clsid_key = format!(r"CLSID\{{{}}}", CLSID_STR);
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let use_hkcu = hkcr
+        .create_subkey(r"CLSID\{00000000-0000-0000-0000-000000000000}")
+        .is_err();
+    let root = if use_hkcu { &hkcu } else { &hkcr };
+    let clsid_prefix = if use_hkcu {
+        r"Software\Classes\CLSID"
+    } else {
+        r"CLSID"
+    };
+    let shell_prefix = if use_hkcu {
+        r"Software\Classes\*\shell"
+    } else {
+        r"*\shell"
+    };
+
+    let clsid_key = format!(r"{}\{{{}}}", clsid_prefix, CLSID_STR);
     let dll_str = dll_path.to_string_lossy().to_string();
 
     // Register CLSID.
-    let (clsid_handle, _) = match hkcr.create_subkey(&clsid_key) {
+    let (clsid_handle, _) = match root.create_subkey(&clsid_key) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create CLSID key: {:#}", e);
             std::process::exit(1);
         }
     };
-    let _ = clsid_handle.set_value("", &"KBIntake Explorer Command");
+    if let Err(e) = clsid_handle.set_value("", &"KBIntake Explorer Command") {
+        eprintln!("ERROR: failed to set CLSID default value: {:#}", e);
+        std::process::exit(1);
+    }
 
-    let (inproc, _) = match hkcr.create_subkey(format!(r"{}\InprocServer32", clsid_key)) {
+    let (inproc, _) = match root.create_subkey(format!(r"{}\InprocServer32", clsid_key)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create InprocServer32 key: {:#}", e);
             std::process::exit(1);
         }
     };
-    let _ = inproc.set_value("", &dll_str);
-    let _ = inproc.set_value("ThreadingModel", &"Apartment");
+    if let Err(e) = inproc.set_value("", &dll_str) {
+        eprintln!("ERROR: failed to set DLL path: {:#}", e);
+        std::process::exit(1);
+    }
+    if let Err(e) = inproc.set_value("ThreadingModel", &"Apartment") {
+        eprintln!("ERROR: failed to set ThreadingModel: {:#}", e);
+        std::process::exit(1);
+    }
 
     // Register as a top-level verb for Win11 native context menu.
-    let verb_key = r"*\shell\KBIntake";
-    let (verb, _) = match hkcr.create_subkey(verb_key) {
+    let verb_key = format!(r"{}\KBIntake", shell_prefix);
+    let (verb, _) = match root.create_subkey(&verb_key) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create shell verb key: {:#}", e);
@@ -93,7 +119,7 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
         let _ = verb.set_value("Icon", &icon_path.to_string_lossy().to_string());
     }
 
-    let (verb_cmd, _) = match hkcr.create_subkey(format!(r"{}\command", verb_key)) {
+    let (verb_cmd, _) = match root.create_subkey(format!(r"{}\command", verb_key)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create verb command key: {:#}", e);
@@ -102,7 +128,8 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
     };
     let _ = verb_cmd.set_value("", &format!("\"{}\" import --process \"%1\"", dll_str));
 
-    println!("COM DLL registered: {}", dll_path.display());
+    let scope = if use_hkcu { "HKCU" } else { "HKCR" };
+    println!("COM DLL registered ({}): {}", scope, dll_path.display());
 }
 
 #[cfg(not(windows))]
@@ -113,15 +140,17 @@ fn cmd_install(_dll: Option<PathBuf>, _icon: Option<PathBuf>) {
 
 #[cfg(windows)]
 fn cmd_uninstall() {
-    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER};
     use winreg::RegKey;
 
+    // Clean up both HKCR and HKCU locations.
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-    let clsid_key = format!(r"CLSID\{{{}}}", CLSID_STR);
-    let verb_key = r"*\shell\KBIntake";
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-    let _ = hkcr.delete_subkey_all(&clsid_key);
-    let _ = hkcr.delete_subkey_all(verb_key);
+    let _ = hkcr.delete_subkey_all(format!(r"CLSID\{{{}}}", CLSID_STR));
+    let _ = hkcr.delete_subkey_all(r"*\shell\KBIntake");
+    let _ = hkcu.delete_subkey_all(format!(r"Software\Classes\CLSID\{{{}}}", CLSID_STR));
+    let _ = hkcu.delete_subkey_all(r"Software\Classes\*\shell\KBIntake");
 
     println!("COM registration removed");
 }
@@ -134,14 +163,21 @@ fn cmd_uninstall() {
 
 #[cfg(windows)]
 fn cmd_status() {
-    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER};
     use winreg::RegKey;
 
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-    let clsid_key = format!(r"CLSID\{{{}}}", CLSID_STR);
-    let verb_key = r"*\shell\KBIntake";
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
 
-    if let Ok(clsid_handle) = hkcr.open_subkey(&clsid_key) {
+    let clsid_key = format!(r"CLSID\{{{}}}", CLSID_STR);
+    let clsid_key_cu = format!(r"Software\Classes\CLSID\{{{}}}", CLSID_STR);
+    let verb_key = r"*\shell\KBIntake";
+    let verb_key_cu = r"Software\Classes\*\shell\KBIntake";
+
+    let clsid_handle = hkcr
+        .open_subkey(&clsid_key)
+        .or_else(|_| hkcu.open_subkey(&clsid_key_cu));
+    if let Ok(clsid_handle) = clsid_handle {
         println!("COM registration: registered");
         if let Ok(inproc) = clsid_handle.open_subkey(r"InprocServer32") {
             if let Ok(path) = inproc.get_value::<String, _>("") {
@@ -152,7 +188,10 @@ fn cmd_status() {
         println!("COM registration: not registered");
     }
 
-    if let Ok(verb) = hkcr.open_subkey(verb_key) {
+    let verb_handle = hkcr
+        .open_subkey(verb_key)
+        .or_else(|_| hkcu.open_subkey(verb_key_cu));
+    if let Ok(verb) = verb_handle {
         if let Ok(label) = verb.get_value::<String, _>("") {
             println!("Explorer verb: {}", label);
         }
