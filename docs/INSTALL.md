@@ -41,13 +41,15 @@ Installed files:
 
 - `kbintake.exe`: command-line binary
 - `kbintakew.exe`: Explorer-friendly binary that does not show a console window
+- `kbintake_com.dll`: COM DLL for Windows 11 native context menu
+- `kbintake-com-reg.exe`: COM DLL registration tool
 - `kbintake.ico`: icon used by Explorer entries
 - `Uninstall.exe`: uninstaller
 
 It also:
 
 - adds the install directory to the current user's `PATH`
-- registers Explorer context menus for files and folders
+- registers Explorer context menus for files and folders (cascading submenu + Win11 native COM menu)
 - creates an uninstall entry in Windows Settings
 
 ## First Import

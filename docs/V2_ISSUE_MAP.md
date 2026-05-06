@@ -26,7 +26,7 @@ Do not continue v2.0 implementation from local momentum alone. Before each new s
 
 ### Core v2 epics
 
-- `#57` Windows 11 native context menu (open — go/no-go pending)
+- `#57` Windows 11 native context menu (closed — COM DLL shipped in installer)
 - `#58` Import template system (closed)
 - `#59` Target `default_subfolder` (closed)
 - `#60` TUI settings (closed)

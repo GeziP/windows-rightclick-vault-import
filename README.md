@@ -34,9 +34,9 @@ kbintake doctor
 
 The installer:
 
-- installs `kbintake.exe`, `kbintakew.exe`, and `kbintake.ico` under `%LOCALAPPDATA%\Programs\kbintake`
+- installs `kbintake.exe`, `kbintakew.exe`, `kbintake_com.dll`, `kbintake-com-reg.exe`, and `kbintake.ico` under `%LOCALAPPDATA%\Programs\kbintake`
 - adds that directory to your user `PATH`
-- registers Explorer right-click entries for files and folders
+- registers Explorer right-click entries for files and folders (cascading submenu + Win11 native COM menu)
 - creates a Windows Settings uninstall entry
 
 ### Winget Status

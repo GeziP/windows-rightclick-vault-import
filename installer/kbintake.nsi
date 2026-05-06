@@ -6,13 +6,15 @@
 !define APP_EXE "kbintake.exe"
 !define APP_GUI_EXE "kbintakew.exe"
 !define APP_ICON "kbintake.ico"
+!define APP_COM_DLL "kbintake_com.dll"
+!define APP_COM_REG "kbintake-com-reg.exe"
 !define APP_VERSION "2.1.0"
 !define POWERSHELL_EXE "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
 
 Name "${APP_NAME}"
 OutFile "..\dist\KBIntake-Setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\kbintake"
-RequestExecutionLevel user
+RequestExecutionLevel admin
 Unicode true
 
 VIProductVersion "${APP_VERSION}.0"
@@ -28,6 +30,8 @@ Section "Install"
   File "..\dist\${APP_EXE}"
   File "..\dist\${APP_GUI_EXE}"
   File "..\dist\${APP_ICON}"
+  File "..\dist\${APP_COM_DLL}"
+  File "..\dist\${APP_COM_REG}"
 
   ExecWait '"$INSTDIR\${APP_EXE}" doctor' $0
   ${If} $0 != 0
@@ -37,6 +41,12 @@ Section "Install"
   ExecWait '"$INSTDIR\${APP_EXE}" explorer install --exe-path "$INSTDIR\${APP_GUI_EXE}" --icon-path "$INSTDIR\${APP_ICON}"' $0
   ${If} $0 != 0
     DetailPrint "Explorer registration returned $0; context menus can be registered later with kbintake explorer install."
+  ${EndIf}
+
+  ; Register COM DLL for Windows 11 native context menu (requires admin for HKCR).
+  ExecWait '"$INSTDIR\${APP_COM_REG}" install --dll "$INSTDIR\${APP_COM_DLL}" --icon "$INSTDIR\${APP_ICON}"' $0
+  ${If} $0 != 0
+    DetailPrint "COM registration returned $0; Win11 native menu can be registered later with kbintake-com-reg install."
   ${EndIf}
 
   Call AddInstallDirToPath
@@ -67,11 +77,17 @@ Section "Uninstall"
   ; Remove tray autostart if it was set
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "KBIntake"
 
+  ; Unregister COM DLL (requires admin for HKCR cleanup).
+  IfFileExists "$INSTDIR\${APP_COM_REG}" 0 +2
+    ExecWait '"$INSTDIR\${APP_COM_REG}" uninstall'
+
   Call un.RemoveInstallDirFromPath
 
   Delete "$INSTDIR\${APP_EXE}"
   Delete "$INSTDIR\${APP_GUI_EXE}"
   Delete "$INSTDIR\${APP_ICON}"
+  Delete "$INSTDIR\${APP_COM_DLL}"
+  Delete "$INSTDIR\${APP_COM_REG}"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir "$INSTDIR"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"

@@ -36,7 +36,7 @@ pub fn guid_to_string(guid: &windows::core::GUID) -> String {
 }
 
 #[cfg(windows)]
-pub fn register(dll_path: &std::path::Path) -> anyhow::Result<()> {
+pub fn register(dll_path: &std::path::Path, icon_path: Option<&std::path::Path>) -> anyhow::Result<()> {
     let dll_str = dll_path.to_string_lossy().to_string();
     let clsid = clsid_key();
 
@@ -58,7 +58,14 @@ pub fn register(dll_path: &std::path::Path) -> anyhow::Result<()> {
         &guid_to_string(&CLSID_KBINTAKE_COMMAND),
     )?;
 
-    // Also add an icon reference.
+    // Set icon for the context menu entry.
+    if let Some(icon) = icon_path {
+        if icon.exists() {
+            verb.set_value("Icon", &icon.to_string_lossy().to_string())?;
+        }
+    }
+
+    // Fallback command for "Show more options" compatibility.
     let (verb_command, _) = hkcr.create_subkey(format!(r"{}\command", verb_key))?;
     verb_command.set_value("", &format!("\"{}\" import --process \"%1\"", dll_str))?;
 
@@ -86,7 +93,7 @@ pub fn unregister() -> anyhow::Result<()> {
 }
 
 #[cfg(not(windows))]
-pub fn register(_dll_path: &std::path::Path) -> anyhow::Result<()> {
+pub fn register(_dll_path: &std::path::Path, _icon_path: Option<&std::path::Path>) -> anyhow::Result<()> {
     anyhow::bail!("COM registration is only supported on Windows")
 }
 

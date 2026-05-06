@@ -21,6 +21,9 @@ enum Commands {
         /// Path to kbintake_com.dll
         #[arg(long)]
         dll: Option<PathBuf>,
+        /// Path to kbintake.ico for the context menu icon
+        #[arg(long)]
+        icon: Option<PathBuf>,
     },
     /// Remove COM registration.
     Uninstall,
@@ -31,14 +34,14 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Install { dll } => cmd_install(dll),
+        Commands::Install { dll, icon } => cmd_install(dll, icon),
         Commands::Uninstall => cmd_uninstall(),
         Commands::Status => cmd_status(),
     }
 }
 
 #[cfg(windows)]
-fn cmd_install(dll: Option<PathBuf>) {
+fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
     use winreg::enums::HKEY_CLASSES_ROOT;
     use winreg::RegKey;
 
@@ -84,6 +87,12 @@ fn cmd_install(dll: Option<PathBuf>) {
     let _ = verb.set_value("", &"Add to Knowledge Base");
     let _ = verb.set_value("ExplorerCommandHandler", &CLSID_STR);
 
+    // Set icon for the context menu entry.
+    let icon_path = icon.unwrap_or_else(find_default_icon);
+    if icon_path.exists() {
+        let _ = verb.set_value("Icon", &icon_path.to_string_lossy().to_string());
+    }
+
     let (verb_cmd, _) = match hkcr.create_subkey(format!(r"{}\command", verb_key)) {
         Ok(v) => v,
         Err(e) => {
@@ -97,7 +106,7 @@ fn cmd_install(dll: Option<PathBuf>) {
 }
 
 #[cfg(not(windows))]
-fn cmd_install(_dll: Option<PathBuf>) {
+fn cmd_install(_dll: Option<PathBuf>, _icon: Option<PathBuf>) {
     eprintln!("ERROR: COM registration is only supported on Windows");
     std::process::exit(1);
 }
@@ -167,4 +176,16 @@ fn find_default_dll() -> PathBuf {
         }
     }
     PathBuf::from("kbintake_com.dll")
+}
+
+fn find_default_icon() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let ico = parent.join("kbintake.ico");
+            if ico.exists() {
+                return ico;
+            }
+        }
+    }
+    PathBuf::from("kbintake.ico")
 }
