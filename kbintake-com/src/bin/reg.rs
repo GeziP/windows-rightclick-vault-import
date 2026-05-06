@@ -21,6 +21,9 @@ enum Commands {
         /// Path to kbintake_com.dll
         #[arg(long)]
         dll: Option<PathBuf>,
+        /// Path to kbintake.exe (used for the fallback shell command)
+        #[arg(long)]
+        exe: Option<PathBuf>,
         /// Path to kbintake.ico for the context menu icon
         #[arg(long)]
         icon: Option<PathBuf>,
@@ -34,14 +37,14 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Install { dll, icon } => cmd_install(dll, icon),
+        Commands::Install { dll, exe, icon } => cmd_install(dll, exe, icon),
         Commands::Uninstall => cmd_uninstall(),
         Commands::Status => cmd_status(),
     }
 }
 
 #[cfg(windows)]
-fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
+fn cmd_install(dll: Option<PathBuf>, exe: Option<PathBuf>, icon: Option<PathBuf>) {
     use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
 
@@ -50,6 +53,9 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
         eprintln!("ERROR: DLL not found at {}", dll_path.display());
         std::process::exit(1);
     }
+
+    let exe_path = exe.unwrap_or_else(find_default_exe);
+    let exe_str = exe_path.to_string_lossy().to_string();
 
     // Always use HKCU — no admin required, visible through HKCR merged view.
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
@@ -113,13 +119,13 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
             std::process::exit(1);
         }
     };
-    let _ = verb_cmd.set_value("", &format!("\"{}\" import --process \"%1\"", dll_str));
+    let _ = verb_cmd.set_value("", &format!("\"{}\" import --process \"%1\"", exe_str));
 
     println!("COM DLL registered (HKCU): {}", dll_path.display());
 }
 
 #[cfg(not(windows))]
-fn cmd_install(_dll: Option<PathBuf>, _icon: Option<PathBuf>) {
+fn cmd_install(_dll: Option<PathBuf>, _exe: Option<PathBuf>, _icon: Option<PathBuf>) {
     eprintln!("ERROR: COM registration is only supported on Windows");
     std::process::exit(1);
 }
@@ -201,6 +207,15 @@ fn find_default_dll() -> PathBuf {
         }
     }
     PathBuf::from("kbintake_com.dll")
+}
+
+fn find_default_exe() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            return parent.join("kbintake.exe");
+        }
+    }
+    PathBuf::from("kbintake.exe")
 }
 
 fn find_default_icon() -> PathBuf {

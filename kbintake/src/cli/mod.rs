@@ -394,11 +394,12 @@ pub fn handle_import(
     ))?;
 
     let mut count = 0usize;
-    for (file, target, _) in routed_files {
+    for (file, target, template_name) in routed_files {
         let mut item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
         if !cli_tags.is_empty() {
             item.cli_tags = Some(cli_tags.join(","));
         }
+        item.template_name = template_name;
         repo.insert_item(&item)?;
         repo.insert_event(&DomainEvent::new(
             "item",

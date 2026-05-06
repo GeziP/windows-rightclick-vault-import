@@ -85,3 +85,7 @@ ALTER TABLE items ADD COLUMN cli_tags TEXT;
 pub const MIGRATION_006_ITEM_IMPORT_SUBFOLDER: &str = r#"
 ALTER TABLE items ADD COLUMN import_subfolder TEXT;
 "#;
+
+pub const MIGRATION_007_ITEM_TEMPLATE_NAME: &str = r#"
+ALTER TABLE items ADD COLUMN template_name TEXT;
+"#;

@@ -44,7 +44,7 @@ Section "Install"
   ${EndIf}
 
   ; Register COM DLL for Windows 11 native context menu (requires admin for HKCR).
-  ExecWait '"$INSTDIR\${APP_COM_REG}" install --dll "$INSTDIR\${APP_COM_DLL}" --icon "$INSTDIR\${APP_ICON}"' $0
+  ExecWait '"$INSTDIR\${APP_COM_REG}" install --dll "$INSTDIR\${APP_COM_DLL}" --exe "$INSTDIR\${APP_EXE}" --icon "$INSTDIR\${APP_ICON}"' $0
   ${If} $0 != 0
     DetailPrint "COM registration returned $0; Win11 native menu can be registered later with kbintake-com-reg install."
   ${EndIf}

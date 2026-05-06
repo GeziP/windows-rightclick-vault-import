@@ -215,11 +215,13 @@ fn handle_event(debounce_map: &mut HashMap<PathBuf, DebounceTracker>, event: &Ev
 
     for path in &event.paths {
         if path.is_file() {
-            // Find the matching watch root and record the event.
-            for (root, tracker) in debounce_map.iter_mut() {
-                if path.starts_with(root) {
-                    tracker.record_event(path.clone());
-                }
+            // Find the most specific (longest) matching watch root and record the event.
+            if let Some((_, tracker)) = debounce_map
+                .iter_mut()
+                .filter(|(root, _)| path.starts_with(root))
+                .max_by_key(|(root, _)| root.as_os_str().len())
+            {
+                tracker.record_event(path.clone());
             }
         }
     }

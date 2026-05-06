@@ -84,27 +84,43 @@ pub fn process_item(app: &App, item: ItemJob) -> Result<()> {
         })
         .unwrap_or_default();
 
-    let rendered_template: Result<Option<template::RenderedTemplate>> =
-        if let Some(template_config) = app.config.template_for_path(&source, size) {
-            let resolved =
-                template::resolve_template(&app.config.templates, &template_config.name)?;
-            Ok(Some(template::render_template(
-                &resolved,
-                &template::TemplateRenderContext {
-                    source_path: item.source_path.clone(),
-                    source_name: item.source_name.clone(),
-                    file_ext: item.file_ext.clone(),
-                    file_size_bytes: size,
-                    imported_at: chrono::Utc::now(),
-                    sha256: hash.clone(),
-                    target_name: target.name.clone(),
-                    batch_id: item.batch_id.clone(),
-                },
-                &cli_tags,
-            )))
-        } else {
-            Ok(None)
-        };
+    let rendered_template: Result<Option<template::RenderedTemplate>> = if let Some(explicit_name) =
+        &item.template_name
+    {
+        let resolved = template::resolve_template(&app.config.templates, explicit_name)?;
+        Ok(Some(template::render_template(
+            &resolved,
+            &template::TemplateRenderContext {
+                source_path: item.source_path.clone(),
+                source_name: item.source_name.clone(),
+                file_ext: item.file_ext.clone(),
+                file_size_bytes: size,
+                imported_at: chrono::Utc::now(),
+                sha256: hash.clone(),
+                target_name: target.name.clone(),
+                batch_id: item.batch_id.clone(),
+            },
+            &cli_tags,
+        )))
+    } else if let Some(template_config) = app.config.template_for_path(&source, size) {
+        let resolved = template::resolve_template(&app.config.templates, &template_config.name)?;
+        Ok(Some(template::render_template(
+            &resolved,
+            &template::TemplateRenderContext {
+                source_path: item.source_path.clone(),
+                source_name: item.source_name.clone(),
+                file_ext: item.file_ext.clone(),
+                file_size_bytes: size,
+                imported_at: chrono::Utc::now(),
+                sha256: hash.clone(),
+                target_name: target.name.clone(),
+                batch_id: item.batch_id.clone(),
+            },
+            &cli_tags,
+        )))
+    } else {
+        Ok(None)
+    };
     let rendered_template = match rendered_template {
         Ok(rendered_template) => rendered_template,
         Err(err) => {

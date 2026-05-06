@@ -125,8 +125,8 @@ impl<'a> Repository<'a> {
             "INSERT INTO items (
                 item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                 source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                cli_tags, import_subfolder, created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+                cli_tags, import_subfolder, template_name, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
             params![
                 &item.item_id,
                 &item.batch_id,
@@ -145,6 +145,7 @@ impl<'a> Repository<'a> {
                 item.error_message.as_deref(),
                 item.cli_tags.as_deref(),
                 item.import_subfolder.as_deref(),
+                item.template_name.as_deref(),
                 item.created_at.to_rfc3339(),
                 item.updated_at.to_rfc3339()
             ],
@@ -156,7 +157,7 @@ impl<'a> Repository<'a> {
         let mut stmt = self.conn.prepare(
             "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                     source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                    cli_tags, import_subfolder, created_at, updated_at
+                    cli_tags, import_subfolder, template_name, created_at, updated_at
              FROM items WHERE batch_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![batch_id], row_to_item)?;
@@ -212,7 +213,7 @@ impl<'a> Repository<'a> {
             .query_row(
                 "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
                         source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
-                        cli_tags, import_subfolder, created_at, updated_at
+                        cli_tags, import_subfolder, template_name, created_at, updated_at
                  FROM items WHERE status = ?1 ORDER BY created_at ASC LIMIT 1",
                 params![state_machine::STATUS_QUEUED],
                 row_to_item,
@@ -530,8 +531,9 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ItemJob> {
         error_message: row.get(14)?,
         cli_tags: row.get(15)?,
         import_subfolder: row.get(16)?,
-        created_at: parse_utc(row.get(17)?)?,
-        updated_at: parse_utc(row.get(18)?)?,
+        template_name: row.get(17)?,
+        created_at: parse_utc(row.get(18)?)?,
+        updated_at: parse_utc(row.get(19)?)?,
     })
 }
 
