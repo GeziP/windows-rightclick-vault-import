@@ -36,7 +36,10 @@ pub fn guid_to_string(guid: &windows::core::GUID) -> String {
 }
 
 #[cfg(windows)]
-pub fn register(dll_path: &std::path::Path, icon_path: Option<&std::path::Path>) -> anyhow::Result<()> {
+pub fn register(
+    dll_path: &std::path::Path,
+    icon_path: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
     let dll_str = dll_path.to_string_lossy().to_string();
     let clsid = clsid_key();
 
@@ -93,7 +96,10 @@ pub fn unregister() -> anyhow::Result<()> {
 }
 
 #[cfg(not(windows))]
-pub fn register(_dll_path: &std::path::Path, _icon_path: Option<&std::path::Path>) -> anyhow::Result<()> {
+pub fn register(
+    _dll_path: &std::path::Path,
+    _icon_path: Option<&std::path::Path>,
+) -> anyhow::Result<()> {
     anyhow::bail!("COM registration is only supported on Windows")
 }
 
