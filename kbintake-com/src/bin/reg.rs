@@ -42,7 +42,7 @@ fn main() {
 
 #[cfg(windows)]
 fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
-    use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER};
+    use winreg::enums::HKEY_CURRENT_USER;
     use winreg::RegKey;
 
     let dll_path = dll.unwrap_or_else(find_default_dll);
@@ -51,29 +51,16 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
         std::process::exit(1);
     }
 
-    // Try HKCR first (admin), fall back to HKCU (no admin needed).
-    let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
+    // Always use HKCU — no admin required, visible through HKCR merged view.
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let use_hkcu = hkcr
-        .create_subkey(r"CLSID\{00000000-0000-0000-0000-000000000000}")
-        .is_err();
-    let root = if use_hkcu { &hkcu } else { &hkcr };
-    let clsid_prefix = if use_hkcu {
-        r"Software\Classes\CLSID"
-    } else {
-        r"CLSID"
-    };
-    let shell_prefix = if use_hkcu {
-        r"Software\Classes\*\shell"
-    } else {
-        r"*\shell"
-    };
+    let clsid_prefix = r"Software\Classes\CLSID";
+    let shell_prefix = r"Software\Classes\*\shell";
 
     let clsid_key = format!(r"{}\{{{}}}", clsid_prefix, CLSID_STR);
     let dll_str = dll_path.to_string_lossy().to_string();
 
     // Register CLSID.
-    let (clsid_handle, _) = match root.create_subkey(&clsid_key) {
+    let (clsid_handle, _) = match hkcu.create_subkey(&clsid_key) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create CLSID key: {:#}", e);
@@ -85,7 +72,7 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
         std::process::exit(1);
     }
 
-    let (inproc, _) = match root.create_subkey(format!(r"{}\InprocServer32", clsid_key)) {
+    let (inproc, _) = match hkcu.create_subkey(format!(r"{}\InprocServer32", clsid_key)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create InprocServer32 key: {:#}", e);
@@ -103,7 +90,7 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
 
     // Register as a top-level verb for Win11 native context menu.
     let verb_key = format!(r"{}\KBIntake", shell_prefix);
-    let (verb, _) = match root.create_subkey(&verb_key) {
+    let (verb, _) = match hkcu.create_subkey(&verb_key) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create shell verb key: {:#}", e);
@@ -119,7 +106,7 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
         let _ = verb.set_value("Icon", &icon_path.to_string_lossy().to_string());
     }
 
-    let (verb_cmd, _) = match root.create_subkey(format!(r"{}\command", verb_key)) {
+    let (verb_cmd, _) = match hkcu.create_subkey(format!(r"{}\command", verb_key)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("ERROR: failed to create verb command key: {:#}", e);
@@ -128,8 +115,7 @@ fn cmd_install(dll: Option<PathBuf>, icon: Option<PathBuf>) {
     };
     let _ = verb_cmd.set_value("", &format!("\"{}\" import --process \"%1\"", dll_str));
 
-    let scope = if use_hkcu { "HKCU" } else { "HKCR" };
-    println!("COM DLL registered ({}): {}", scope, dll_path.display());
+    println!("COM DLL registered (HKCU): {}", dll_path.display());
 }
 
 #[cfg(not(windows))]

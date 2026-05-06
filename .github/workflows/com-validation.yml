@@ -77,7 +77,8 @@ jobs:
       - name: Verify registration (CLSID key exists)
         shell: pwsh
         run: |
-          $clsidKey = "HKCR:\CLSID\{$env:CLSID}"
+          # Registration writes to HKCU\Software\Classes (no admin needed).
+          $clsidKey = "HKCU:\Software\Classes\CLSID\{$env:CLSID}"
           if (-not (Test-Path $clsidKey)) {
             Write-Error "CLSID key not found: $clsidKey"
             exit 1
@@ -107,7 +108,8 @@ jobs:
       - name: Verify registration (Explorer verb for Win11 top-level menu)
         shell: pwsh
         run: |
-          $verbKey = "HKCR:\*\shell\KBIntake"
+          # Registration writes to HKCU\Software\Classes (no admin needed).
+          $verbKey = "HKCU:\Software\Classes\*\shell\KBIntake"
           if (-not (Test-Path $verbKey)) {
             Write-Error "Explorer verb key not found: $verbKey"
             exit 1
@@ -159,7 +161,7 @@ jobs:
       - name: Verify cleanup (CLSID key removed)
         shell: pwsh
         run: |
-          $clsidKey = "HKCR:\CLSID\{$env:CLSID}"
+          $clsidKey = "HKCU:\Software\Classes\CLSID\{$env:CLSID}"
           if (Test-Path $clsidKey) {
             Write-Error "CLSID key still exists after uninstall: $clsidKey"
             exit 1
@@ -169,7 +171,7 @@ jobs:
       - name: Verify cleanup (Explorer verb removed)
         shell: pwsh
         run: |
-          $verbKey = "HKCR:\*\shell\KBIntake"
+          $verbKey = "HKCU:\Software\Classes\*\shell\KBIntake"
           if (Test-Path $verbKey) {
             Write-Error "Explorer verb key still exists after uninstall"
             exit 1
