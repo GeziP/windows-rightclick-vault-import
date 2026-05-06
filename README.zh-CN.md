@@ -59,19 +59,13 @@ kbintake doctor
 %LOCALAPPDATA%\Programs\kbintake
 ```
 
-### winget 状态
+### winget
 
-项目已经准备并验证了 winget manifest，位置在：
+v2.1.1 的 winget manifest 位于 `installer/winget/2.1.1/`。社区仓库 PR：<https://github.com/microsoft/winget-pkgs/pull/369491>
 
-```text
-installer\winget\1.0.0
-```
+在 PR 合并前，请先使用 GitHub Release 里的安装包。
 
-社区仓库 PR 已提交：<https://github.com/microsoft/winget-pkgs/pull/364698>
-
-在 PR 合并到 public winget source 前，请先使用 GitHub Release 里的安装包。
-
-发布到 winget 后，预计使用：
+发布后可使用：
 
 ```powershell
 winget install GeziP.KBIntake
@@ -275,31 +269,27 @@ kbintake doctor
 
 ## 从源码构建
 
-安装 Rust 后执行：
+安装 Rust 后从仓库根目录执行：
 
 ```powershell
-cd kbintake
 cargo build --release --locked --bins
 ```
 
 本地构建安装包需要 NSIS：
 
 ```powershell
-cd E:\gezi\windows-rightclick-vault-import
 New-Item -ItemType Directory -Force .\dist | Out-Null
-Copy-Item .\kbintake\target\release\kbintake.exe .\dist\kbintake.exe -Force
-Copy-Item .\kbintake\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
+Copy-Item .\target\release\kbintake.exe .\dist\kbintake.exe -Force
+Copy-Item .\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
 Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
 & "C:\Program Files (x86)\NSIS\makensis.exe" .\installer\kbintake.nsi
 ```
 
 ## 待开发和后续计划
 
-- v2.0 发布：安装包更新、版本号升级、CHANGELOG、发布说明
 - Windows 11 COM DLL 物理机验证
 - 跟进 `microsoft/winget-pkgs` PR 合并
 - 给发布二进制做 Authenticode 签名，降低 SmartScreen 提示
-- 文档更新（模板示例库、配置参考）
 - 补做 service reboot-resume 验证
 
 更多状态见：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)

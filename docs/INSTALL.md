@@ -100,25 +100,25 @@ Service status: not installed
 
 ## Winget
 
-The winget manifest is present in this repository under:
+The winget manifest is in:
 
 ```text
-installer\winget\2.0.0
+installer\winget\2.1.1
 ```
 
 It validates locally with:
 
 ```powershell
-winget validate --manifest .\installer\winget\2.0.0
+winget validate --manifest .\installer\winget\2.1.1
 ```
 
-The community package PR has been submitted:
+The community package PR:
 
 ```text
-https://github.com/microsoft/winget-pkgs/pull/364698
+https://github.com/microsoft/winget-pkgs/pull/369491
 ```
 
-The package is not yet available from the public winget community source. After the PR is merged, install will use:
+After the PR is merged:
 
 ```powershell
 winget install GeziP.KBIntake

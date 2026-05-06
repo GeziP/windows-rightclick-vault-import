@@ -173,14 +173,13 @@ cargo build --release --locked --bins          # kbintake + kbintakew
 
 ### Documentation (#67)
 
-- Configuration reference updated for v2.0
-- Template gallery docs pending (#69, #73)
-- Config.toml reference docs pending (#68, #72)
-- CONTRIBUTING.md pending (#70)
+- Configuration reference: complete (`docs/CONFIGURATION.md`)
+- Template gallery: complete (`docs/TEMPLATE_GALLERY.md`)
+- CONTRIBUTING.md: complete
 
 ### Winget Publication (#43)
 
-- PR submitted: `https://github.com/microsoft/winget-pkgs/pull/364698`
+- v2.1.1 PR submitted: `https://github.com/microsoft/winget-pkgs/pull/369491`
 - Pending merge
 
 ### Distribution Hardening

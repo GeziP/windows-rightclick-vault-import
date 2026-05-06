@@ -1,6 +1,6 @@
 # KBIntake v2.0 Issue Map
 
-Last updated: 2026-04-29
+Last updated: 2026-05-06
 
 ## Purpose
 
@@ -36,7 +36,7 @@ Do not continue v2.0 implementation from local momentum alone. Before each new s
 - `#64` Quick tag injection (closed)
 - `#65` Vault audit (closed)
 - `#66` Clipboard import and release prep (closed)
-- `#67` Documentation tracker (open)
+- `#67` Documentation tracker (closed — template gallery, config reference, CONTRIBUTING all complete)
 
 ### Post-handoff epics
 
@@ -134,7 +134,7 @@ Implemented after initial v2.0 handoff:
 - **File-based logging for background modes**:
   - `logging::init_service_logging()` writes to `%LOCALAPPDATA%\kbintake\logs\kbintake-YYYY-MM-DD.log`
   - Enabled for tray and service run commands
-- **Schema version**: bumped from 5 to 6
+- **Schema version**: bumped from 5 to 6, then to 7 (template_name column)
 
 ### Phase 1 / Epic `#60` TUI settings
 
@@ -287,8 +287,7 @@ Before coding:
 
 ## Recommended Next Slice
 
-All planned v2.0 features implemented including post-handoff additions (tray, directory preservation). Remaining:
+All planned v2.0 features implemented including post-handoff additions (tray, directory preservation). Documentation pass complete (`#67`). v2.1.1 released. Remaining:
 
 - Real Windows 11 validation of the `kbintake-com` DLL on a physical machine (`#57`)
-- Documentation pass (`#67`)
-- Release preparation (version bump, CHANGELOG, installer update)
+- Winget PR merge (`#369491`)

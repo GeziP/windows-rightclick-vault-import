@@ -39,13 +39,13 @@ The installer:
 - registers Explorer right-click entries for files and folders (cascading submenu + Win11 native COM menu)
 - creates a Windows Settings uninstall entry
 
-### Winget Status
+### Winget
 
-The winget manifest is prepared and validated in `installer/winget/1.0.0`, and the community package PR has been submitted: <https://github.com/microsoft/winget-pkgs/pull/364698>.
+The winget manifest for v2.1.1 is in `installer/winget/2.1.1/`. The community package PR: <https://github.com/microsoft/winget-pkgs/pull/369491>.
 
-Until that PR is merged into the public winget source, use the GitHub Release installer.
+Until the PR is merged, use the GitHub Release installer.
 
-Expected command after publication:
+After publication:
 
 ```powershell
 winget install GeziP.KBIntake
@@ -248,10 +248,9 @@ Common fixes:
 
 ## Build From Source
 
-Install Rust from <https://rustup.rs>, then:
+Install Rust from <https://rustup.rs>, then from the repository root:
 
 ```powershell
-cd kbintake
 cargo build --release --locked --bins
 ```
 
@@ -259,8 +258,8 @@ To build the installer locally, install NSIS and run from the repository root:
 
 ```powershell
 New-Item -ItemType Directory -Force .\dist | Out-Null
-Copy-Item .\kbintake\target\release\kbintake.exe .\dist\kbintake.exe -Force
-Copy-Item .\kbintake\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
+Copy-Item .\target\release\kbintake.exe .\dist\kbintake.exe -Force
+Copy-Item .\target\release\kbintakew.exe .\dist\kbintakew.exe -Force
 Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
 & "C:\Program Files (x86)\NSIS\makensis.exe" .\installer\kbintake.nsi
 ```
@@ -270,7 +269,6 @@ Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
 Automated checks:
 
 ```powershell
-cd kbintake
 cargo fmt --all -- --check
 cargo test --locked
 cargo clippy --all-targets --all-features --locked -- -D warnings
@@ -289,11 +287,9 @@ Manual Windows smoke checks:
 
 ## Planned Work
 
-- v2.0 release: installer update, version bump, CHANGELOG, release notes
 - Windows 11 COM DLL physical machine validation
 - monitor the `microsoft/winget-pkgs` PR for winget publication
 - code-sign release binaries to reduce SmartScreen friction
-- documentation pass for v2.0 (template gallery, config reference update)
 - perform reboot-resume validation for service mode
 
 See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -303,8 +299,9 @@ See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ROADMAP.md](docs/
 - [Chinese README](README.zh-CN.md)
 - [Install guide](docs/INSTALL.md)
 - [Configuration reference](docs/CONFIGURATION.md)
+- [Template gallery](docs/TEMPLATE_GALLERY.md)
+- [Contributing guide](CONTRIBUTING.md)
 - [Project status](docs/PROJECT_STATUS.md)
-- [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [Development roadmap](docs/ROADMAP.md)
+- [Release checklist](docs/RELEASE_CHECKLIST.md)
 - [Product requirements](docs/PRD.md)
-- [Contributor guide](AGENTS.md)
