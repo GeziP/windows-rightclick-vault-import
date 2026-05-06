@@ -7,7 +7,7 @@ This guide is for Windows users who want KBIntake installed for Explorer right-c
 1. Open the release page:
 
 ```text
-https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.1
 ```
 
 2. Download `KBIntake-Setup.exe`.

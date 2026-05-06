@@ -1,5 +1,16 @@
 # Changelog
 
+## v2.1.1 (2026-05-06)
+
+Patch release fixing issues found during code review.
+
+### Fixed
+
+- COM registration fallback command now points to `kbintake.exe` instead of the DLL, so the legacy "Show more options" context menu works correctly.
+- COM object reference counting: `DllCanUnloadNow` now correctly reports when the DLL can be unloaded.
+- `--template` choice is now persisted through queued processing (DB migration 007), so explicit template overrides survive queue-based imports.
+- Nested watch directories use longest-prefix matching to avoid duplicate file processing.
+
 ## v2.1.0 (2026-05-03)
 
 Patch release fixing CLI tag injection and adding optional tray auto-start to the installer.

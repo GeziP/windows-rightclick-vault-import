@@ -8,7 +8,7 @@
 !define APP_ICON "kbintake.ico"
 !define APP_COM_DLL "kbintake_com.dll"
 !define APP_COM_REG "kbintake-com-reg.exe"
-!define APP_VERSION "2.1.0"
+!define APP_VERSION "2.1.1"
 !define POWERSHELL_EXE "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
 
 Name "${APP_NAME}"
