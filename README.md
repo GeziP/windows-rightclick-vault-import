@@ -2,9 +2,9 @@
 
 KBIntake is a Windows-first local vault importer. It lets you send files and folders into a knowledge-base vault from PowerShell or from the Windows Explorer right-click menu, while keeping an auditable SQLite job history.
 
-Current release: `v1.0.0`
+Current release: `v2.1.0`
 
-- Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0>
+- Download: <https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0>
 - Chinese README: [README.zh-CN.md](README.zh-CN.md)
 
 ## What It Is For
@@ -23,7 +23,7 @@ KBIntake does not require a cloud service. Configuration, queue state, manifests
 
 ### Recommended
 
-1. Open the [v1.0.0 release page](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0).
+1. Open the [v2.1.0 release page](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0).
 2. Download `KBIntake-Setup.exe`.
 3. Run the installer.
 4. Open a new PowerShell window and run:
@@ -34,9 +34,9 @@ kbintake doctor
 
 The installer:
 
-- installs `kbintake.exe`, `kbintakew.exe`, and `kbintake.ico` under `%LOCALAPPDATA%\Programs\kbintake`
+- installs `kbintake.exe`, `kbintakew.exe`, `kbintake_com.dll`, `kbintake-com-reg.exe`, and `kbintake.ico` under `%LOCALAPPDATA%\Programs\kbintake`
 - adds that directory to your user `PATH`
-- registers Explorer right-click entries for files and folders
+- registers Explorer right-click entries for files and folders (cascading submenu + Win11 native COM menu)
 - creates a Windows Settings uninstall entry
 
 ### Winget Status
@@ -56,9 +56,10 @@ winget install GeziP.KBIntake
 Explorer flow:
 
 1. Right-click a file or folder.
-2. Choose the KBIntake action.
-3. KBIntake imports it silently and shows a Windows toast notification.
-4. Inspect the result:
+2. Choose the KBIntake action to expand the submenu.
+3. Select Import (process immediately), Queue (queue for later), or Settings (open TUI).
+4. KBIntake imports it silently and shows a Windows toast notification.
+5. Inspect the result:
 
 ```powershell
 kbintake jobs list
@@ -72,9 +73,54 @@ kbintake import --process C:\path\to\note.md
 kbintake jobs list
 ```
 
+## Obsidian Integration
+
+KBIntake can import files directly into your Obsidian vault and auto-open notes after import.
+
+### Setup
+
+1. Add your Obsidian vault as a KBIntake target:
+
+```powershell
+kbintake targets add obsidian "C:\Users\<you>\Documents\YourVaultName"
+kbintake targets set-default obsidian
+```
+
+2. Edit `%LOCALAPPDATA%\kbintake\config.toml` — add `obsidian_vault` to the target and enable auto-open:
+
+```toml
+[[targets]]
+target_id = "obsidian"
+name = "obsidian"
+root_path = 'C:\Users\<you>\Documents\YourVaultName'
+status = "active"
+obsidian_vault = "YourVaultName"
+
+[import]
+auto_open_obsidian = true
+```
+
+`obsidian_vault` must match the vault name shown in Obsidian's sidebar.
+
+### Usage
+
+```powershell
+# Import and open in Obsidian
+kbintake import note.md --process --open
+
+# Import without opening
+kbintake import note.md --process
+
+# Import from clipboard
+kbintake import --clipboard --process
+```
+
+On first run, KBIntake generates default templates. Imported `.md` files go to `vault/notes/`, PDFs to `vault/documents/`, code files to `vault/snippets/`, etc. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full template list.
+
 ## Features
 
-- Explorer right-click import for files and folders
+- Explorer cascading right-click menu with Import / Queue / Settings sub-items
+- Windows 11 native top-level context menu via COM DLL
 - no-console Explorer flow through `kbintakew.exe`
 - Windows toast notifications for success, duplicate, and failure cases
 - terminal import flow with optional immediate processing
@@ -82,13 +128,22 @@ kbintake jobs list
 - SHA-256 hashing and per-target duplicate detection
 - deterministic filename conflict handling without overwriting existing files
 - multiple vault targets with add/list/show/rename/remove/set-default commands
-- extension-based routing rules in `config.toml`
-- Markdown frontmatter injection with an opt-out
+- import template system with variable interpolation and conditional rendering
+- v2 multi-condition routing rules with template binding
+- per-target default subfolder configuration
+- Markdown frontmatter injection with template-defined fields
+- `--tags` quick tag injection merged with template tags
+- `--clipboard` import file paths from Windows clipboard
 - dry-run preview with table or JSON output
 - job list/show with table or JSON output
 - retry failed jobs
 - hash-safe undo for imported batches
 - per-target vault statistics
+- `vault audit` command for orphan, missing, duplicate, and malformed frontmatter detection
+- Watch Mode: monitor directories for new files with debounce and extension filters
+- TUI interactive settings (`kbintake tui`)
+- Obsidian URI integration with auto-open after import
+- zh-CN (Chinese) localization (CLI, toast, TUI, Explorer context menu)
 - Windows Service mode for background queue processing
 - release workflow that publishes installer and binary assets
 - winget manifest copy stored under `installer/winget/`
@@ -100,6 +155,7 @@ kbintake --version
 kbintake version
 kbintake doctor [--fix] [--migrate]
 kbintake config show
+kbintake config validate
 kbintake config set-target <path> [--name <name>]
 kbintake config-show
 kbintake targets list [--include-archived]
@@ -108,12 +164,16 @@ kbintake targets add <name> <path>
 kbintake targets rename <target> <new-name>
 kbintake targets remove <target> [--force]
 kbintake targets set-default <target>
-kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
+kbintake import [--target <target>] [--template <name>] [--tags "a,b"] [--clipboard] [--process] [--dry-run] [--json] [--open] <path...>
 kbintake jobs list [--status <status>] [--limit <n>] [--json] [--table]
 kbintake jobs show <batch-id> [--json] [--table]
 kbintake jobs retry <batch-id>
 kbintake jobs undo <batch-id> [--force]
 kbintake vault stats [--target <target>] [--json]
+kbintake vault audit [--target <target>] [--fix] [--json]
+kbintake watch [--path <dir>]
+kbintake tui
+kbintake obsidian open --vault <name> <note-path>
 kbintake explorer install [--exe-path <path>] [--icon-path <path>] [--queue-only]
 kbintake explorer uninstall
 kbintake agent
@@ -135,10 +195,15 @@ Runtime state lives in `%LOCALAPPDATA%\kbintake` by default:
 
 Important config sections:
 
-- `[[targets]]`: vault destinations
-- `[[routing]]`: extension rules, such as sending PDFs to an archive target
+- `[[targets]]`: vault destinations (with optional `default_subfolder`, `obsidian_vault`)
+- `[[templates]]`: import templates with subfolder, tags, and frontmatter
+- `[[routing_rules]]`: v2 multi-condition routing with template binding
+- `[[routing]]`: v1 extension-based routing (still supported)
+- `[[watch]]`: directories to monitor for automatic import
 - `[import].max_file_size_mb`: file size guardrail
 - `[import].inject_frontmatter`: Markdown metadata injection
+- `[import].language`: output language (`"en"` or `"zh-CN"`), also controls Explorer context menu text
+- `[import].auto_open_obsidian`: auto-open imported notes in Obsidian
 - `[agent].poll_interval_secs`: background worker polling interval
 
 Full reference: [docs/CONFIGURATION.md](docs/CONFIGURATION.md)
@@ -224,13 +289,12 @@ Manual Windows smoke checks:
 
 ## Planned Work
 
+- v2.0 release: installer update, version bump, CHANGELOG, release notes
+- Windows 11 COM DLL physical machine validation
 - monitor the `microsoft/winget-pkgs` PR for winget publication
-- complete public winget install smoke after merge
 - code-sign release binaries to reduce SmartScreen friction
-- add first-class installer options for service install/start
+- documentation pass for v2.0 (template gallery, config reference update)
 - perform reboot-resume validation for service mode
-- improve GitHub Actions ahead of the Node 20 deprecation
-- continue E9 follow-up work around passive background operation
 
 See [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/ROADMAP.md](docs/ROADMAP.md).
 

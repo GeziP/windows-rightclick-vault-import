@@ -18,7 +18,11 @@ fn kbintake_command(app_data_dir: &std::path::Path) -> Command {
 }
 
 fn bootstrap_temp_app(temp: &tempfile::TempDir) -> App {
-    App::bootstrap_in(temp.path().join("appdata")).unwrap()
+    let mut app = App::bootstrap_in(temp.path().join("appdata")).unwrap();
+    app.config.templates.clear();
+    app.config.routing_rules.clear();
+    app.config.save().unwrap();
+    app
 }
 
 #[test]
@@ -101,7 +105,7 @@ fn import_enqueue_creates_batch_and_items() {
     fs::write(&root_file, "root").unwrap();
     fs::write(&nested_file, "child").unwrap();
 
-    handle_import(&app, None, vec![root_file, nested_dir]).unwrap();
+    handle_import(&app, None, None, &[], vec![root_file, nested_dir]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -131,7 +135,7 @@ fn agent_processes_queued_import_successfully() {
     let source = temp.path().join("note.md");
     fs::write(&source, "hello").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -164,7 +168,7 @@ fn markdown_import_injects_frontmatter_with_original_hash() {
     fs::write(&source, "hello").unwrap();
     let original_hash = kbintake::processor::hasher::sha256_file(&source).unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let stored = app.config.targets[0].root_path.join("note.md");
@@ -193,7 +197,7 @@ fn markdown_import_appends_to_existing_frontmatter() {
     let source = temp.path().join("frontmatter.md");
     fs::write(&source, "---\ntitle: Original\n---\nbody").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let content =
@@ -204,13 +208,138 @@ fn markdown_import_appends_to_existing_frontmatter() {
 }
 
 #[test]
+fn template_import_stores_markdown_in_rendered_subfolder() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "capture"
+subfolder = "captures/{{imported_at_date}}"
+[templates.frontmatter]
+title = "{{file_name}}"
+kind = "note"
+
+[[routing_rules]]
+extension = "md"
+template = "capture"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("templated.md");
+    fs::write(&source, "body").unwrap();
+    let original_hash = kbintake::processor::hasher::sha256_file(&source).unwrap();
+
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let expected_subfolder = chrono::Utc::now().format("captures/%Y-%m-%d").to_string();
+    let stored = app.config.targets[0]
+        .root_path
+        .join(&expected_subfolder)
+        .join("templated.md");
+    let stored_display = stored.display().to_string();
+    let content = fs::read_to_string(&stored).unwrap();
+    assert!(stored.exists());
+    assert!(content.starts_with("---\n"));
+    assert!(content.contains("title: \"templated\"\n"));
+    assert!(content.contains("kind: \"note\"\n"));
+    assert!(content.contains("kbintake_source:"));
+    assert!(
+        content.find("title: \"templated\"").unwrap() < content.find("kbintake_source:").unwrap()
+    );
+    assert!(content.find("kind: \"note\"").unwrap() < content.find("kbintake_source:").unwrap());
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(item.stored_path.as_deref(), Some(stored_display.as_str()));
+    assert!(item.stored_sha256.is_some());
+    assert_ne!(item.stored_sha256.as_deref(), Some(original_hash.as_str()));
+    assert_eq!(item.sha256.as_deref(), Some(original_hash.as_str()));
+}
+
+#[test]
+fn v2_routing_rule_target_and_template_route_import_end_to_end() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    handle_targets(
+        &app,
+        TargetCommands::Add {
+            name: "archive".to_string(),
+            path: temp.path().join("archive-vault"),
+        },
+    )
+    .unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "paper"
+subfolder = "papers/{{imported_at_date}}"
+[templates.frontmatter]
+kind = "paper"
+
+[[routing_rules]]
+extension = "pdf"
+template = "paper"
+target = "archive"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+    let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
+    let source = temp.path().join("routed.pdf");
+    fs::write(&source, "pdf body").unwrap();
+
+    let outcome = handle_import(&app, None, None, &[], vec![source]).unwrap();
+    drain_queue(&app).unwrap();
+
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.get_batch(&outcome.batch_id).unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+
+    let expected_subfolder = chrono::Utc::now().format("papers/%Y-%m-%d").to_string();
+    let stored = temp
+        .path()
+        .join("archive-vault")
+        .join(expected_subfolder)
+        .join("routed.pdf");
+    let stored_display = stored.display().to_string();
+
+    assert_eq!(outcome.target_name, "archive");
+    assert_eq!(batch.target_id, "archive");
+    assert_eq!(item.target_id, "archive");
+    assert_eq!(item.status, state_machine::STATUS_SUCCESS);
+    assert!(stored.exists());
+    assert_eq!(item.stored_path.as_deref(), Some(stored_display.as_str()));
+    assert!(!app.config.targets[0].root_path.join("routed.pdf").exists());
+}
+
+#[test]
 fn non_markdown_import_is_not_modified() {
     let temp = tempfile::tempdir().unwrap();
     let app = bootstrap_temp_app(&temp);
     let source = temp.path().join("note.txt");
     fs::write(&source, "plain text").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let content = fs::read_to_string(app.config.targets[0].root_path.join("note.txt")).unwrap();
@@ -227,7 +356,7 @@ fn frontmatter_injection_can_be_disabled() {
     let source = temp.path().join("disabled.md");
     fs::write(&source, "raw").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let content = fs::read_to_string(app.config.targets[0].root_path.join("disabled.md")).unwrap();
@@ -243,7 +372,7 @@ fn agent_marks_duplicate_without_second_copy() {
     fs::write(&first, "same").unwrap();
     fs::write(&second, "same").unwrap();
 
-    handle_import(&app, None, vec![first, second]).unwrap();
+    handle_import(&app, None, None, &[], vec![first, second]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -281,7 +410,7 @@ fn explicit_import_target_processes_into_selected_vault() {
     let source = temp.path().join("archive-note.md");
     fs::write(&source, "hello archive").unwrap();
 
-    handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+    handle_import(&app, Some("archive".to_string()), None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     let conn = app.open_conn().unwrap();
@@ -330,7 +459,7 @@ fn import_uses_extension_routing_without_explicit_target() {
     let source = temp.path().join("report.PDF");
     fs::write(&source, "pdf").unwrap();
 
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     assert!(temp
@@ -373,7 +502,7 @@ fn explicit_target_overrides_extension_routing() {
     let source = temp.path().join("manual.pdf");
     fs::write(&source, "pdf").unwrap();
 
-    handle_import(&app, Some("default".to_string()), vec![source]).unwrap();
+    handle_import(&app, Some("default".to_string()), None, &[], vec![source]).unwrap();
     drain_queue(&app).unwrap();
 
     assert!(app.config.targets[0].root_path.join("manual.pdf").exists());
@@ -412,13 +541,93 @@ fn config_show_displays_routing_rules() {
 }
 
 #[test]
+fn cli_config_validate_accepts_v2_config_sections() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    assert!(kbintake_command(&app_data_dir)
+        .args(["targets", "add", "archive"])
+        .arg(temp.path().join("archive-vault"))
+        .output()
+        .unwrap()
+        .status
+        .success());
+    let config_path = app_data_dir.join("config.toml");
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "research-paper"
+subfolder = "references"
+tags = ["research"]
+[templates.frontmatter]
+type = "paper"
+source = "{{source_path}}"
+
+[[routing_rules]]
+extension = "pdf"
+template = "research-paper"
+target = "archive"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["config", "validate"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Config validation succeeded."));
+}
+
+#[test]
+fn cli_config_validate_rejects_missing_template() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = bootstrap_temp_app(&temp);
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[routing_rules]]
+extension = "pdf"
+template = "missing"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+
+    let output = kbintake_command(&app.config.app_data_dir)
+        .args(["config", "validate"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("[ERROR] routing rule references missing template 'missing'"));
+}
+
+#[test]
 fn import_process_drains_new_work_end_to_end() {
     let temp = tempfile::tempdir().unwrap();
     let app = bootstrap_temp_app(&temp);
     let source = temp.path().join("process-note.md");
     fs::write(&source, "process me").unwrap();
 
-    handle_import_command(&app, None, true, false, false, vec![source]).unwrap();
+    handle_import_command(
+        &app,
+        None,
+        None,
+        None,
+        true,
+        false,
+        false,
+        false,
+        false,
+        vec![source],
+    )
+    .unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -445,7 +654,19 @@ fn import_without_process_leaves_work_queued() {
     let source = temp.path().join("queued-note.md");
     fs::write(&source, "queue me").unwrap();
 
-    handle_import_command(&app, None, false, false, false, vec![source]).unwrap();
+    handle_import_command(
+        &app,
+        None,
+        None,
+        None,
+        false,
+        false,
+        false,
+        false,
+        false,
+        vec![source],
+    )
+    .unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -463,9 +684,21 @@ fn import_process_failure_before_enqueue_does_not_drain_existing_queue() {
     let existing = temp.path().join("existing.md");
     let missing = temp.path().join("missing.md");
     fs::write(&existing, "still queued").unwrap();
-    handle_import(&app, None, vec![existing]).unwrap();
+    handle_import(&app, None, None, &[], vec![existing]).unwrap();
 
-    let err = handle_import_command(&app, None, true, false, false, vec![missing]).unwrap_err();
+    let err = handle_import_command(
+        &app,
+        None,
+        None,
+        None,
+        true,
+        false,
+        false,
+        false,
+        false,
+        vec![missing],
+    )
+    .unwrap_err();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -482,7 +715,7 @@ fn jobs_retry_requeues_failed_items_for_successful_agent_drain() {
     let app = bootstrap_temp_app(&temp);
     let source = temp.path().join("retry-note.md");
     fs::write(&source, "will disappear").unwrap();
-    handle_import(&app, None, vec![source.clone()]).unwrap();
+    handle_import(&app, None, None, &[], vec![source.clone()]).unwrap();
     fs::remove_file(&source).unwrap();
     drain_queue(&app).unwrap();
 
@@ -574,6 +807,63 @@ fn jobs_undo_deletes_imported_files_and_marks_batch_undone() {
     assert_eq!(batch.status, state_machine::STATUS_UNDONE);
     assert_eq!(item.status, state_machine::STATUS_UNDONE);
     assert_eq!(manifest_count_for_item(&conn, &item.item_id), 0);
+}
+
+#[test]
+fn jobs_undo_deletes_template_frontmatter_import_without_false_modified_warning() {
+    let temp = tempfile::tempdir().unwrap();
+    let app_data_dir = temp.path().join("appdata");
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let config_path = app.config.config_path();
+    let mut config = fs::read_to_string(&config_path).unwrap();
+    config.push_str(
+        r#"
+
+[[templates]]
+name = "capture"
+subfolder = "captures/{{imported_at_date}}"
+[templates.frontmatter]
+title = "{{file_name}}"
+kind = "note"
+
+[[routing_rules]]
+extension = "md"
+template = "capture"
+"#,
+    );
+    fs::write(&config_path, config).unwrap();
+
+    let source = temp.path().join("undo-template.md");
+    fs::write(&source, "undo me").unwrap();
+    assert!(kbintake_command(&app_data_dir)
+        .args(["import", "--process"])
+        .arg(&source)
+        .output()
+        .unwrap()
+        .status
+        .success());
+
+    let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
+    let conn = app.open_conn().unwrap();
+    let repo = Repository::new(&conn);
+    let batch = repo.list_batches(1).unwrap().pop().unwrap();
+    let item = repo
+        .list_items_by_batch(&batch.batch_id)
+        .unwrap()
+        .pop()
+        .unwrap();
+    let stored_path = item.stored_path.clone().unwrap();
+    assert!(item.stored_sha256.is_some());
+    drop(conn);
+
+    let output = kbintake_command(&app_data_dir)
+        .args(["jobs", "undo", &batch.batch_id])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
+    assert!(!std::path::Path::new(&stored_path).exists());
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("WARN: File"));
 }
 
 #[test]
@@ -812,7 +1102,7 @@ fn jobs_undo_rejects_queued_batch() {
     let source = temp.path().join("queued-undo.md");
     fs::write(&source, "queued").unwrap();
     let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
-    handle_import(&app, None, vec![source]).unwrap();
+    handle_import(&app, None, None, &[], vec![source]).unwrap();
 
     let conn = app.open_conn().unwrap();
     let repo = Repository::new(&conn);
@@ -837,7 +1127,7 @@ fn cli_jobs_list_json_supports_status_filter_and_limit() {
     let app = App::bootstrap_in(app_data_dir.clone()).unwrap();
     let source = temp.path().join("failed.md");
     fs::write(&source, "will fail").unwrap();
-    handle_import(&app, None, vec![source.clone()]).unwrap();
+    handle_import(&app, None, None, &[], vec![source.clone()]).unwrap();
     fs::remove_file(&source).unwrap();
     drain_queue(&app).unwrap();
 
@@ -980,7 +1270,7 @@ fn cli_doctor_fix_creates_missing_target_and_reports_checks() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[OK] Config file"));
     assert!(stdout.contains("[OK] Database schema"));
-    assert!(stdout.contains("Schema version: 3 (up to date)"));
+    assert!(stdout.contains("Schema version: 6 (up to date)"));
     assert!(stdout.contains("[OK] Target directory"));
     assert!(app_data_dir.join("vault").exists());
 }
@@ -1022,7 +1312,7 @@ fn cli_doctor_migrate_flag_reports_schema_version() {
         .unwrap();
 
     assert_eq!(output.status.code(), Some(kbintake::exit_codes::SUCCESS));
-    assert!(String::from_utf8_lossy(&output.stdout).contains("Schema version: 3 (up to date)"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Schema version: 6 (up to date)"));
 }
 
 #[test]
@@ -1130,6 +1420,8 @@ fn cli_import_dry_run_prints_preview_without_creating_batch() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Source Path"));
+    assert!(stdout.contains("Target"));
+    assert!(stdout.contains("Rule"));
     assert!(stdout.contains("Destination"));
     assert!(stdout.contains("copy"));
 
@@ -1237,6 +1529,8 @@ fn cli_import_dry_run_json_outputs_preview_array() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value[0]["action"], "copy");
     assert_eq!(value[0]["source"], source.display().to_string());
+    assert_eq!(value[0]["target"], "default");
+    assert_eq!(value[0]["matched_rule_template"], "notes");
     assert!(value[0]["destination"]
         .as_str()
         .unwrap()

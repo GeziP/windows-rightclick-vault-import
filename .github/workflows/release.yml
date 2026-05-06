@@ -17,10 +17,6 @@ jobs:
     name: Windows release
     runs-on: windows-latest
 
-    defaults:
-      run:
-        working-directory: kbintake
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,8 +29,6 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: kbintake -> target
 
       - name: Test
         run: cargo test --locked
@@ -42,23 +36,31 @@ jobs:
       - name: Build release binary
         run: cargo build --release --locked --bins --target x86_64-pc-windows-msvc
 
+      - name: Build COM DLL
+        run: cargo build --release --locked -p kbintake-com --target x86_64-pc-windows-msvc
+
       - name: Stage release assets
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force ..\dist | Out-Null
-          Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintake.exe ..\dist\kbintake.exe -Force
-          Copy-Item .\target\x86_64-pc-windows-msvc\release\kbintakew.exe ..\dist\kbintakew.exe -Force
-          Copy-Item .\assets\kbintake.ico ..\dist\kbintake.ico -Force
-          $hash = (Get-FileHash ..\dist\kbintake.exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          $guiHash = (Get-FileHash ..\dist\kbintakew.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target\x86_64-pc-windows-msvc\release\kbintake.exe dist\kbintake.exe -Force
+          Copy-Item target\x86_64-pc-windows-msvc\release\kbintakew.exe dist\kbintakew.exe -Force
+          Copy-Item target\x86_64-pc-windows-msvc\release\kbintake_com.dll dist\kbintake_com.dll -Force
+          Copy-Item target\x86_64-pc-windows-msvc\release\kbintake-com-reg.exe dist\kbintake-com-reg.exe -Force
+          Copy-Item kbintake\assets\kbintake.ico dist\kbintake.ico -Force
+          $hash = (Get-FileHash dist\kbintake.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $guiHash = (Get-FileHash dist\kbintakew.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $comHash = (Get-FileHash dist\kbintake_com.dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          $regHash = (Get-FileHash dist\kbintake-com-reg.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           @(
             "kbintake.exe  sha256=$hash"
             "kbintakew.exe  sha256=$guiHash"
-          ) | Set-Content ..\dist\SHA256SUMS.txt -Encoding utf8
+            "kbintake_com.dll  sha256=$comHash"
+            "kbintake-com-reg.exe  sha256=$regHash"
+          ) | Set-Content dist\SHA256SUMS.txt -Encoding utf8
 
       - name: Install NSIS
         shell: pwsh
-        working-directory: .
         run: choco install nsis -y --no-progress
 
       - name: Build installer
@@ -76,6 +78,8 @@ jobs:
             dist/KBIntake-Setup.exe
             dist/kbintake.exe
             dist/kbintakew.exe
+            dist/kbintake_com.dll
+            dist/kbintake-com-reg.exe
             dist/kbintake.ico
             dist/SHA256SUMS.txt
           body_path: CHANGELOG.md

@@ -1,0 +1,31 @@
+[package]
+name = "kbintake-com"
+version = "0.1.0"
+edition = "2021"
+description = "Windows 11 native Explorer COM DLL for KBIntake (IExplorerCommand)"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "kbintake-com-reg"
+path = "src/bin/reg.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+winreg = "0.52"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+] }
+
+[dev-dependencies]
+tempfile = "3"

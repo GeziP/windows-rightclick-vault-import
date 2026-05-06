@@ -6,7 +6,8 @@ pub const SERVICE_DISPLAY_NAME: &str = "KBIntake";
 #[cfg(windows)]
 mod imp {
     use std::ffi::OsString;
-    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -20,6 +21,7 @@ mod imp {
     use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
     use crate::agent::scheduler;
+    use crate::agent::watcher;
     use crate::app::App;
 
     use super::{Path, PathBuf, SERVICE_DISPLAY_NAME, SERVICE_NAME};
@@ -179,16 +181,19 @@ mod imp {
     }
 
     fn run_service() -> Result<()> {
-        let event_handler = move |control_event| -> ServiceControlHandlerResult {
-            match control_event {
-                ServiceControl::Stop => {
-                    if let Some(tx) = STOP_TX.get() {
-                        let _ = tx.send(());
+        let shutdown_flag = Arc::new(AtomicBool::new(false));
+
+        let event_handler = {
+            let flag = Arc::clone(&shutdown_flag);
+            move |control_event| -> ServiceControlHandlerResult {
+                match control_event {
+                    ServiceControl::Stop => {
+                        flag.store(true, Ordering::SeqCst);
+                        ServiceControlHandlerResult::NoError
                     }
-                    ServiceControlHandlerResult::NoError
+                    ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
+                    _ => ServiceControlHandlerResult::NotImplemented,
                 }
-                ServiceControl::Interrogate => ServiceControlHandlerResult::NoError,
-                _ => ServiceControlHandlerResult::NotImplemented,
             }
         };
 
@@ -205,27 +210,56 @@ mod imp {
             .get()
             .cloned()
             .context("service app data directory not initialized")?;
-        let app = App::bootstrap_in(app_data_dir)?;
-
-        let (stop_tx, stop_rx) = mpsc::channel();
-        STOP_TX
-            .set(stop_tx)
-            .map_err(|_| anyhow::anyhow!("service stop channel already initialized"))?;
+        let app = App::bootstrap_in(app_data_dir.clone())?;
 
         let poll_interval = Duration::from_secs(app.config.agent.poll_interval_secs.max(1));
+
+        // Spawn watcher thread if configured.
+        let watcher_handle = if app.config.agent.watch_in_service && !app.config.watch.is_empty() {
+            let flag = Arc::clone(&shutdown_flag);
+            let dir = app_data_dir.clone();
+            Some(thread::spawn(move || -> Result<()> {
+                let watcher_app = App::bootstrap_in(dir)?;
+                match watcher::run_watcher(&watcher_app, None, flag) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        // Watcher errors are non-fatal to the service.
+                        tracing::warn!(error = %e, "watcher thread exited with error");
+                        Ok(())
+                    }
+                }
+            }))
+        } else {
+            None
+        };
+
+        // Queue processor loop.
+        let sleep_chunk = Duration::from_millis(200);
         loop {
             if scheduler::process_next_item(&app)? {
-                if stop_rx.try_recv().is_ok() {
+                if shutdown_flag.load(Ordering::SeqCst) {
                     break;
                 }
                 continue;
             }
 
-            match stop_rx.recv_timeout(poll_interval) {
-                Ok(()) => break,
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
+            // Poll-interval sleep with shutdown check.
+            let mut elapsed = Duration::ZERO;
+            while elapsed < poll_interval {
+                if shutdown_flag.load(Ordering::SeqCst) {
+                    break;
+                }
+                thread::sleep(sleep_chunk.min(poll_interval - elapsed));
+                elapsed += sleep_chunk;
             }
+            if shutdown_flag.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+
+        // Wait for watcher thread to finish.
+        if let Some(handle) = watcher_handle {
+            let _ = handle.join();
         }
 
         status_handle.set_service_status(service_status(
@@ -237,8 +271,6 @@ mod imp {
         ))?;
         Ok(())
     }
-
-    static STOP_TX: std::sync::OnceLock<mpsc::Sender<()>> = std::sync::OnceLock::new();
 
     fn wait_for_state(
         service: &windows_service::service::Service,

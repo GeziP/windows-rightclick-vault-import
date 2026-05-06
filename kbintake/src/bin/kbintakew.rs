@@ -14,7 +14,8 @@ fn main() -> ExitCode {
     let _log_guard = match &cli.command {
         Commands::Service {
             command: ServiceCommands::Run,
-        } => {
+        }
+        | Commands::Tray { .. } => {
             let log_dir = cli
                 .app_data_dir
                 .clone()
@@ -37,14 +38,28 @@ fn main() -> ExitCode {
             .and_then(|app| agent::run_agent(&app))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Agent, err)),
+        Commands::Watch { path } => app::App::bootstrap_at(app_data_dir)
+            .and_then(|app| {
+                let paths = if path.is_empty() { None } else { Some(path) };
+                cli::handle_watch(&app, paths)
+            })
+            .map_err(|err| (CommandKind::Watch, err)),
         Commands::Import {
             target,
+            template,
+            tags,
             process,
             dry_run,
             json,
+            open,
+            clipboard,
             paths,
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_import_command(&app, target, process, dry_run, json, paths))
+            .and_then(|app| {
+                cli::handle_import_command(
+                    &app, target, template, tags, process, dry_run, json, open, clipboard, paths,
+                )
+            })
             .map_err(|err| (CommandKind::Import, err)),
         Commands::Jobs { command } => {
             let kind = CommandKind::Jobs(command_kind(&command));
@@ -68,16 +83,33 @@ fn main() -> ExitCode {
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Vault, err)),
         Commands::Explorer {
-            command: ExplorerCommands::RunImport { queue_only, paths },
+            command:
+                ExplorerCommands::RunImport {
+                    queue_only,
+                    template,
+                    tags,
+                    paths,
+                },
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_explorer_run_import(&app, queue_only, paths))
+            .and_then(|app| {
+                cli::handle_explorer_run_import(&app, queue_only, template, tags, paths)
+            })
             .map_err(|err| {
                 cli::handle_explorer_run_import_error(&err);
                 (CommandKind::Explorer, err)
             }),
-        Commands::Explorer { command } => cli::handle_explorer(command)
-            .map(|()| exit_codes::SUCCESS)
-            .map_err(|err| (CommandKind::Explorer, err)),
+        Commands::Explorer { command } => {
+            let data_dir = app_data_dir
+                .clone()
+                .unwrap_or_else(kbintake::config::default_app_data_dir);
+            let lang = kbintake::config::AppConfig::load_or_init_in(data_dir)
+                .ok()
+                .map(|config| config.language().to_string())
+                .unwrap_or_else(|| "en".to_string());
+            cli::handle_explorer(command, &lang)
+                .map(|()| exit_codes::SUCCESS)
+                .map_err(|err| (CommandKind::Explorer, err))
+        }
         Commands::Service { command } => {
             handle_service_command(command, app_data_dir).map_err(|err| (CommandKind::Service, err))
         }
@@ -86,6 +118,19 @@ fn main() -> ExitCode {
             .map_err(|err| (CommandKind::Doctor, err)),
         Commands::ConfigShow => app::App::bootstrap_at(app_data_dir)
             .and_then(|app| cli::handle_config_show(&app))
+            .map(|()| exit_codes::SUCCESS)
+            .map_err(|err| (CommandKind::Config, err)),
+        Commands::Tui => app::App::bootstrap_at(app_data_dir)
+            .and_then(|app| kbintake::tui::run_settings_tui(app.config))
+            .map(|()| exit_codes::SUCCESS)
+            .map_err(|err| (CommandKind::Config, err)),
+        Commands::Tray { .. } => {
+            let dir = app_data_dir.unwrap_or_else(kbintake::config::default_app_data_dir);
+            kbintake::tray::run_tray(dir)
+                .map(|()| exit_codes::SUCCESS)
+                .map_err(|err| (CommandKind::Config, err))
+        }
+        Commands::Obsidian { command } => cli::handle_obsidian(command)
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
         Commands::Version => {
@@ -103,6 +148,7 @@ fn main() -> ExitCode {
 #[derive(Debug, Clone, Copy)]
 enum CommandKind {
     Agent,
+    Watch,
     Import,
     Jobs(JobKind),
     Targets(TargetKind),
@@ -193,7 +239,7 @@ fn handle_service_command(
 fn classify_error(kind: CommandKind, err: &Error) -> i32 {
     if matches!(
         kind,
-        CommandKind::Doctor | CommandKind::Explorer | CommandKind::Service
+        CommandKind::Doctor | CommandKind::Explorer | CommandKind::Service | CommandKind::Watch
     ) {
         return exit_codes::GENERAL_ERROR;
     }

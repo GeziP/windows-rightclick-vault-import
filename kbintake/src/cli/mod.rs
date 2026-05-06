@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
@@ -10,6 +12,7 @@ use crate::app::App;
 use crate::config::{self, AppConfig};
 use crate::domain::{BatchJob, DomainEvent, ItemJob};
 use crate::exit_codes;
+use crate::i18n::tr;
 use crate::notify::ToastContent;
 use crate::processor::scanner;
 use crate::queue::repository::Repository;
@@ -31,12 +34,20 @@ pub enum Commands {
     Import {
         #[arg(long)]
         target: Option<String>,
+        #[arg(long, short)]
+        template: Option<String>,
+        #[arg(long, help = "Comma-separated tags to inject into frontmatter")]
+        tags: Option<String>,
         #[arg(long)]
         process: bool,
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
         json: bool,
+        #[arg(long, help = "Open imported notes in Obsidian after import")]
+        open: bool,
+        #[arg(long, help = "Read file paths from Windows clipboard")]
+        clipboard: bool,
         paths: Vec<PathBuf>,
     },
     Jobs {
@@ -73,7 +84,35 @@ pub enum Commands {
         migrate: bool,
     },
     ConfigShow,
+    #[command(about = "Watch directories for new files and queue them for import")]
+    Watch {
+        #[arg(long, help = "Directory to watch; can be specified multiple times")]
+        path: Vec<PathBuf>,
+    },
+    #[command(about = "Open interactive settings TUI")]
+    Tui,
+    #[command(about = "Run as system tray icon with background watcher")]
+    Tray {
+        #[arg(long, help = "Start minimized (for autostart)")]
+        minimized: bool,
+    },
+    #[command(about = "Obsidian URI utilities")]
+    Obsidian {
+        #[command(subcommand)]
+        command: ObsidianCommands,
+    },
     Version,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ObsidianCommands {
+    #[command(about = "Open a note in Obsidian by vault and path")]
+    Open {
+        #[arg(long, help = "Obsidian vault name")]
+        vault: String,
+        #[arg(help = "Path to the note within the vault")]
+        note: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -108,6 +147,7 @@ pub enum JobCommands {
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommands {
     Show,
+    Validate,
     SetTarget {
         path: PathBuf,
         #[arg(long, default_value = "default")]
@@ -164,6 +204,15 @@ pub enum VaultCommands {
         #[arg(long, help = "Output stats as JSON")]
         json: bool,
     },
+    #[command(about = "Audit vault for orphan, missing, and duplicate files")]
+    Audit {
+        #[arg(long, help = "Audit a single target ID or name")]
+        target: Option<String>,
+        #[arg(long, help = "Auto-fix issues (clean missing records, deduplicate)")]
+        fix: bool,
+        #[arg(long, help = "Output audit report as JSON")]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -186,9 +235,15 @@ pub enum ExplorerCommands {
     #[command(about = "Remove Windows Explorer right-click menu entries")]
     Uninstall,
     #[command(hide = true)]
+    ComFeasibility,
+    #[command(hide = true)]
     RunImport {
         #[arg(long, help = "Queue right-click imports without immediate processing")]
         queue_only: bool,
+        #[arg(long, help = "Template name to use for this import")]
+        template: Option<String>,
+        #[arg(long, help = "Comma-separated tags to inject")]
+        tags: Option<String>,
         paths: Vec<PathBuf>,
     },
 }
@@ -209,6 +264,7 @@ pub struct ImportOutcome {
     pub batch_id: String,
     pub item_count: usize,
     pub target_name: String,
+    pub routing_summary: RoutingSummary,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -220,27 +276,61 @@ pub struct ExplorerBatchSummary {
     pub target_name: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoutingSummary {
+    None,
+    Single(String),
+    Multiple,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn handle_import_command(
     app: &App,
     target_id: Option<String>,
+    template: Option<String>,
+    tags: Option<String>,
     process: bool,
     dry_run: bool,
     json: bool,
+    open: bool,
+    clipboard: bool,
     paths: Vec<PathBuf>,
 ) -> Result<i32> {
+    let cli_tags: Vec<String> = tags
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut all_paths = paths;
+    if clipboard {
+        let clip_paths = crate::clipboard::read_clipboard_paths()?;
+        all_paths.extend(clip_paths);
+    }
+
     if dry_run {
-        let rows = crate::processor::dry_run::preview_import(app, target_id, paths)?;
+        let rows = crate::processor::dry_run::preview_import(
+            app, target_id, template, &cli_tags, all_paths,
+        )?;
+        let lang = app.config.language();
         if json {
             println!("{}", serde_json::to_string_pretty(&rows)?);
         } else {
-            crate::processor::dry_run::print_table(&rows);
+            crate::processor::dry_run::print_table(&rows, lang);
         }
         return Ok(exit_codes::SUCCESS);
     }
 
-    let outcome = handle_import(app, target_id, paths)?;
+    let outcome = handle_import(app, target_id, template, &cli_tags, all_paths)?;
     if process {
         scheduler::drain_queue(app)?;
+        if open {
+            open_successful_notes_in_obsidian(app, &outcome.batch_id)?;
+        }
         return import_exit_code(app, &outcome.batch_id);
     }
     Ok(exit_codes::SUCCESS)
@@ -249,16 +339,16 @@ pub fn handle_import_command(
 pub fn handle_import(
     app: &App,
     target_id: Option<String>,
+    template: Option<String>,
+    cli_tags: &[String],
     paths: Vec<PathBuf>,
 ) -> Result<ImportOutcome> {
+    let lang = app.config.language();
     if paths.is_empty() {
-        anyhow::bail!("no input paths provided");
+        anyhow::bail!("{}", tr("cli.no_input_paths", lang));
     }
 
-    let explicit_target = match target_id {
-        Some(target_id) => Some(app.config.target_by_id(&target_id)?),
-        None => None,
-    };
+    let explicit_target = target_id;
     let mut files = Vec::new();
     for path in paths {
         let discovered = scanner::expand_input_path(&path)
@@ -266,7 +356,7 @@ pub fn handle_import(
         files.extend(discovered);
     }
     if files.is_empty() {
-        anyhow::bail!("no importable files found");
+        anyhow::bail!("{}", tr("cli.no_importable_files", lang));
     }
 
     let conn = app.open_conn()?;
@@ -274,16 +364,22 @@ pub fn handle_import(
     let routed_files = files
         .into_iter()
         .map(|file| {
-            let target = match &explicit_target {
-                Some(target) => target.clone(),
-                None => app.config.target_for_path(&file)?,
-            };
-            Ok((file, target))
+            let source_size_bytes = std::fs::metadata(&file)
+                .with_context(|| format!("failed to inspect {}", file.display()))?
+                .len();
+            let intent = app.config.resolve_import_intent(
+                &file,
+                source_size_bytes,
+                explicit_target.clone(),
+                template.clone(),
+            )?;
+            Ok((file, intent.target, intent.template_name))
         })
         .collect::<Result<Vec<_>>>()?;
     let batch_target_id = common_target_id(&routed_files)
         .unwrap_or("mixed")
         .to_string();
+    let routing_summary = summarize_routing(&routed_files);
     let batch = BatchJob::new("cli", &batch_target_id, routed_files.len() as i64);
     repo.insert_batch(&batch)?;
     repo.insert_event(&DomainEvent::new(
@@ -298,8 +394,11 @@ pub fn handle_import(
     ))?;
 
     let mut count = 0usize;
-    for (file, target) in routed_files {
-        let item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
+    for (file, target, _) in routed_files {
+        let mut item = ItemJob::new(batch.batch_id.clone(), target.target_id.clone(), file);
+        if !cli_tags.is_empty() {
+            item.cli_tags = Some(cli_tags.join(","));
+        }
         repo.insert_item(&item)?;
         repo.insert_event(&DomainEvent::new(
             "item",
@@ -315,32 +414,66 @@ pub fn handle_import(
     }
 
     info!(batch_id = %batch.batch_id, items = count, "batch queued");
-    println!("Queued batch: {}", batch.batch_id);
-    println!("Items queued: {}", count);
+    println!(
+        "{}",
+        tr("cli.queued_batch", lang).replace("{}", &batch.batch_id)
+    );
+    println!(
+        "{}",
+        tr("cli.items_queued", lang).replace("{}", &count.to_string())
+    );
     let target_name = if batch_target_id == "mixed" {
         "mixed".to_string()
     } else {
         app.config.target_any_by_id(&batch_target_id)?.name
     };
-    println!("Target: {}", target_name);
+    println!("{}", tr("cli.target", lang).replace("{}", &target_name));
+    match &routing_summary {
+        RoutingSummary::Single(rule) => println!(
+            "{}",
+            tr("cli.routing_rule_single", lang).replace("{}", rule)
+        ),
+        RoutingSummary::Multiple => println!("{}", tr("cli.routing_rule_multiple", lang)),
+        RoutingSummary::None => {}
+    }
     Ok(ImportOutcome {
         batch_id: batch.batch_id,
         item_count: count,
         target_name,
+        routing_summary,
     })
 }
 
-fn common_target_id(routed_files: &[(PathBuf, crate::domain::Target)]) -> Option<&str> {
+fn common_target_id(
+    routed_files: &[(PathBuf, crate::domain::Target, Option<String>)],
+) -> Option<&str> {
     let first = routed_files.first()?.1.target_id.as_str();
     routed_files
         .iter()
-        .all(|(_, target)| target.target_id == first)
+        .all(|(_, target, _)| target.target_id == first)
         .then_some(first)
+}
+
+fn summarize_routing(
+    routed_files: &[(PathBuf, crate::domain::Target, Option<String>)],
+) -> RoutingSummary {
+    let mut matched = routed_files
+        .iter()
+        .filter_map(|(_, _, template)| template.as_deref())
+        .collect::<Vec<_>>();
+    matched.sort_unstable();
+    matched.dedup();
+    match matched.as_slice() {
+        [] => RoutingSummary::None,
+        [single] => RoutingSummary::Single((*single).to_string()),
+        _ => RoutingSummary::Multiple,
+    }
 }
 
 pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
+    let lang = app.config.language();
 
     match command {
         JobCommands::List {
@@ -349,8 +482,8 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             json,
             table,
         } => {
-            ensure_job_output_mode(json, table)?;
-            let status = parse_batch_status_filter(status)?;
+            ensure_job_output_mode(json, table, lang)?;
+            let status = parse_batch_status_filter(status, lang)?;
             let rows = repo.list_batches_filtered(limit as i64, status.as_deref())?;
             if json {
                 let out = rows
@@ -379,7 +512,7 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             json,
             table,
         } => {
-            ensure_job_output_mode(json, table)?;
+            ensure_job_output_mode(json, table, lang)?;
             let batch = repo.get_batch(&batch_id)?;
             let items = repo.list_items_by_batch(&batch_id)?;
             if json {
@@ -407,11 +540,14 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
                 return Ok(exit_codes::SUCCESS);
             }
 
-            println!("Batch: {}", batch.batch_id);
-            println!("Status: {}", batch.status);
-            println!("Source: {}", batch.source);
-            println!("Target: {}", batch.target_id);
-            println!("Items: {}", items.len());
+            println!("{}", tr("cli.batch", lang).replace("{}", &batch.batch_id));
+            println!("{}", tr("cli.status", lang).replace("{}", &batch.status));
+            println!("{}", tr("cli.source", lang).replace("{}", &batch.source));
+            println!("{}", tr("cli.target", lang).replace("{}", &batch.target_id));
+            println!(
+                "{}",
+                tr("cli.items", lang).replace("{}", &items.len().to_string())
+            );
             println!("{}", format_job_show_header());
             for item in items {
                 println!("{}", format_job_show_row(&item));
@@ -440,7 +576,10 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
                     }),
                 ))?;
             }
-            println!("Retried items: {retried}");
+            println!(
+                "{}",
+                tr("cli.retried_items", lang).replace("{retried}", &retried.to_string())
+            );
             Ok(exit_codes::SUCCESS)
         }
         JobCommands::Undo { batch_id, force } => {
@@ -448,7 +587,10 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             if batch.status == crate::queue::state_machine::STATUS_UNDONE
                 || batch.status == crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
             {
-                println!("Batch already undone: {}", batch.batch_id);
+                println!(
+                    "{}",
+                    tr("cli.batch_already_undone", lang).replace("{}", &batch.batch_id)
+                );
                 return Ok(exit_codes::SUCCESS);
             }
             if batch.status == crate::queue::state_machine::STATUS_QUEUED
@@ -489,17 +631,22 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
 
                 let path = PathBuf::from(&stored_path);
                 if path.exists() {
-                    let expected_hash = item.sha256.as_deref().unwrap_or_default();
-                    let hash_matches = if app.config.import.inject_frontmatter
-                        && crate::processor::frontmatter::is_markdown_extension(
-                            item.file_ext.as_deref(),
-                        ) {
-                        crate::processor::frontmatter::file_matches_original_hash(
-                            &path,
-                            expected_hash,
-                        )?
-                    } else {
+                    let hash_matches = if let Some(expected_hash) = item.stored_sha256.as_deref() {
                         crate::processor::hasher::sha256_file(&path)? == expected_hash
+                    } else {
+                        let expected_hash = item.sha256.as_deref().unwrap_or_default();
+                        if app.config.import.inject_frontmatter
+                            && crate::processor::frontmatter::is_markdown_extension(
+                                item.file_ext.as_deref(),
+                            )
+                        {
+                            crate::processor::frontmatter::file_matches_original_hash(
+                                &path,
+                                expected_hash,
+                            )?
+                        } else {
+                            crate::processor::hasher::sha256_file(&path)? == expected_hash
+                        }
                     };
                     if !hash_matches {
                         let warning = format!(
@@ -564,8 +711,10 @@ pub fn handle_jobs(app: &App, command: JobCommands) -> Result<i32> {
             ))?;
 
             println!(
-                "Undo complete: {} deleted, {} skipped (modified).",
-                deleted_count, skipped_modified_count
+                "{}",
+                tr("cli.undo_complete", lang)
+                    .replacen("{}", &deleted_count.to_string(), 1)
+                    .replacen("{}", &skipped_modified_count.to_string(), 1)
             );
             if skipped_modified_count > 0 {
                 Ok(exit_codes::PARTIAL_SUCCESS)
@@ -590,9 +739,9 @@ fn format_event_line(event: DomainEvent) -> String {
     )
 }
 
-fn ensure_job_output_mode(json: bool, table: bool) -> Result<()> {
+fn ensure_job_output_mode(json: bool, table: bool, lang: &str) -> Result<()> {
     if json && table {
-        anyhow::bail!("--json and --table cannot be used together");
+        anyhow::bail!("{}", tr("cli.json_table_mutual", lang));
     }
     Ok(())
 }
@@ -683,7 +832,7 @@ struct JobShowItemRow {
     error_message: Option<String>,
 }
 
-fn parse_batch_status_filter(status: Option<String>) -> Result<Option<String>> {
+fn parse_batch_status_filter(status: Option<String>, lang: &str) -> Result<Option<String>> {
     let Some(status) = status else {
         return Ok(None);
     };
@@ -701,23 +850,34 @@ fn parse_batch_status_filter(status: Option<String>) -> Result<Option<String>> {
         return Ok(Some(status));
     }
 
-    anyhow::bail!("unsupported status filter: {status}");
+    anyhow::bail!(
+        "{}",
+        tr("cli.unsupported_status", lang).replace("{status}", &status)
+    );
 }
 
 pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
+    let lang = app.config.language();
     let mut failed = false;
-    println!("Config dir: {}", app.config.app_data_dir.display());
-    println!("Database: {}", app.db_path.display());
+    println!(
+        "{}",
+        tr("cli.config_dir", lang).replace("{}", &app.config.app_data_dir.display().to_string())
+    );
+    println!(
+        "{}",
+        tr("cli.database", lang).replace("{}", &app.db_path.display().to_string())
+    );
 
     let config_path = app.config.config_path();
     if config_path.exists() {
-        print_doctor_ok("Config file", &format!("{}", config_path.display()));
+        print_doctor_ok("Config file", &format!("{}", config_path.display()), lang);
     } else {
         failed = true;
         print_doctor_fail(
             "Config file",
             &format!("missing at {}", config_path.display()),
             "Run: kbintake doctor --fix",
+            lang,
         );
     }
 
@@ -732,6 +892,7 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                     print_doctor_ok(
                         "Database schema",
                         &format!("Schema version: {} (up to date)", version),
+                        lang,
                     );
                 }
                 Err(err) => {
@@ -740,6 +901,7 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                         "Database schema",
                         &err.to_string(),
                         "Check that the app data directory is writable; run: kbintake doctor --migrate",
+                        lang,
                     );
                 }
             }
@@ -750,6 +912,7 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                 "Database schema",
                 &err.to_string(),
                 "Check that the app data directory is writable; run: kbintake doctor --migrate",
+                lang,
             );
         }
     }
@@ -757,18 +920,22 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
     match app.config.default_target() {
         Ok(target) => {
             println!(
-                "Default target: {} ({})",
-                target.name,
-                target.root_path.display()
+                "{}",
+                tr("cli.default_target", lang).replace("{}", &target.name)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
             );
             match check_target_root(&target.root_path, fix) {
                 Ok(()) => print_doctor_ok(
                     "Target directory",
                     &format!("{}", target.root_path.display()),
+                    lang,
                 ),
                 Err(DoctorFailure { message, hint }) => {
                     failed = true;
-                    print_doctor_fail("Target directory", &message, &hint);
+                    print_doctor_fail("Target directory", &message, &hint, lang);
                 }
             }
         }
@@ -778,17 +945,120 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
                 "Default target",
                 &err.to_string(),
                 "Run: kbintake config set-target <path>",
+                lang,
             );
         }
     }
 
+    // Validate default_subfolder on all active targets
+    for target in &app.config.targets {
+        if !target.is_active() {
+            continue;
+        }
+        if let Some(subfolder) = &target.default_subfolder {
+            if subfolder.trim().is_empty() {
+                failed = true;
+                print_doctor_fail(
+                    "Subfolder",
+                    &format!("target '{}' has empty default_subfolder", target.target_id),
+                    "Edit config.toml and set a non-empty default_subfolder, or remove it",
+                    lang,
+                );
+            } else if std::path::Path::new(subfolder).is_absolute() {
+                failed = true;
+                print_doctor_fail(
+                    "Subfolder",
+                    &format!(
+                        "target '{}' default_subfolder must be relative: {}",
+                        target.target_id, subfolder
+                    ),
+                    "Edit config.toml and use a relative path like 'inbox'",
+                    lang,
+                );
+            } else {
+                let resolved = target.root_path.join(subfolder);
+                if resolved.exists() && !resolved.is_dir() {
+                    failed = true;
+                    print_doctor_fail(
+                        "Subfolder",
+                        &format!(
+                            "target '{}' subfolder exists but is not a directory: {}",
+                            target.target_id,
+                            resolved.display()
+                        ),
+                        "Remove the file or change default_subfolder in config.toml",
+                        lang,
+                    );
+                } else if !resolved.exists() {
+                    if fix {
+                        match std::fs::create_dir_all(&resolved) {
+                            Ok(()) => print_doctor_ok(
+                                "Subfolder",
+                                &format!(
+                                    "target '{}' created: {}",
+                                    target.target_id,
+                                    resolved.display()
+                                ),
+                                lang,
+                            ),
+                            Err(err) => {
+                                failed = true;
+                                print_doctor_fail(
+                                    "Subfolder",
+                                    &format!(
+                                        "target '{}' cannot create: {}",
+                                        target.target_id, err
+                                    ),
+                                    "Check permissions on the parent directory",
+                                    lang,
+                                );
+                            }
+                        }
+                    } else {
+                        print_doctor_warn(
+                            "Subfolder",
+                            &format!(
+                                "target '{}' subfolder does not exist: {}",
+                                target.target_id,
+                                resolved.display()
+                            ),
+                            "Run: kbintake doctor --fix to create it",
+                            lang,
+                        );
+                    }
+                } else {
+                    match crate::config::validate_target_root(&resolved) {
+                        Ok(()) => print_doctor_ok(
+                            "Subfolder",
+                            &format!("target '{}': {}", target.target_id, resolved.display()),
+                            lang,
+                        ),
+                        Err(err) => {
+                            failed = true;
+                            print_doctor_fail(
+                                "Subfolder",
+                                &format!(
+                                    "target '{}' subfolder not writable: {}",
+                                    target.target_id, err
+                                ),
+                                "Check folder permissions",
+                                lang,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if crate::explorer::is_installed().unwrap_or(false) {
-        print_doctor_ok("Explorer context menu", "registered");
+        print_doctor_ok("Explorer context menu", "registered", lang);
     } else {
         print_doctor_warn(
             "Explorer context menu",
             "not registered",
             "Run: kbintake explorer install",
+            lang,
         );
     }
 
@@ -797,16 +1067,18 @@ pub fn handle_doctor(app: &App, fix: bool, migrate: bool) -> Result<i32> {
             "Routing",
             &warning,
             "Run: kbintake targets add <name> <path> or update config.toml",
+            lang,
         );
     }
 
     if command_on_path("kbintake") {
-        print_doctor_ok("PATH", "kbintake found");
+        print_doctor_ok("PATH", "kbintake found", lang);
     } else {
         print_doctor_warn(
             "PATH",
             "kbintake not found on PATH",
             "Add %LOCALAPPDATA%\\Programs\\kbintake to your PATH",
+            lang,
         );
     }
 
@@ -849,18 +1121,33 @@ fn check_target_root(
     })
 }
 
-fn print_doctor_ok(check: &str, detail: &str) {
-    println!("[OK] {check}: {detail}");
+fn print_doctor_ok(check: &str, detail: &str, lang: &str) {
+    println!(
+        "{}",
+        tr("cli.ok_check", lang)
+            .replace("{check}", check)
+            .replace("{detail}", detail)
+    );
 }
 
-fn print_doctor_warn(check: &str, detail: &str, hint: &str) {
-    println!("[WARN] {check}: {detail}");
-    println!("  Hint: {hint}");
+fn print_doctor_warn(check: &str, detail: &str, hint: &str, lang: &str) {
+    println!(
+        "{}",
+        tr("cli.warn_check", lang)
+            .replace("{check}", check)
+            .replace("{detail}", detail)
+    );
+    println!("{}", tr("cli.warn_hint", lang).replace("{hint}", hint));
 }
 
-fn print_doctor_fail(check: &str, detail: &str, hint: &str) {
-    println!("[FAIL] {check}: {detail}");
-    println!("  Hint: {hint}");
+fn print_doctor_fail(check: &str, detail: &str, hint: &str, lang: &str) {
+    println!(
+        "{}",
+        tr("cli.fail_check", lang)
+            .replace("{check}", check)
+            .replace("{detail}", detail)
+    );
+    println!("{}", tr("cli.fail_hint", lang).replace("{hint}", hint));
 }
 
 fn command_on_path(command: &str) -> bool {
@@ -878,25 +1165,50 @@ pub fn handle_config_show(app: &App) -> Result<()> {
 }
 
 pub fn handle_config(app: &App, command: ConfigCommands) -> Result<()> {
+    let lang = app.config.language();
     match command {
         ConfigCommands::Show => handle_config_show(app),
+        ConfigCommands::Validate => {
+            let validation = app.config.validate_semantics();
+            for warning in &validation.warnings {
+                println!("[WARN] {warning}");
+            }
+            if validation.is_valid() {
+                println!("{}", tr("cli.config_valid", lang));
+                return Ok(());
+            }
+            for error in &validation.errors {
+                println!("[ERROR] {error}");
+            }
+            anyhow::bail!(
+                "config validation failed with {} error(s)",
+                validation.errors.len()
+            )
+        }
         ConfigCommands::SetTarget { path, name } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.set_default_target(name, path)?;
             config::validate_target_root(&target.root_path)?;
             config.save()?;
-            println!("Default target: {}", target.name);
-            println!("Path: {}", target.root_path.display());
+            println!(
+                "{}",
+                tr("cli.default_target", lang).replace("{}", &target.name)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
     }
 }
 
 pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
+    let lang = app.config.language();
     match command {
         TargetCommands::List { include_archived } => {
             if include_archived {
-                println!("default  target  name  status  path");
+                println!("{}", tr("cli.target_list_header", lang));
             }
             for (index, target) in app
                 .config
@@ -931,10 +1243,19 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
         }
         TargetCommands::Show { target } => {
             let target = app.config.target_any_by_id(&target)?;
-            println!("Target: {}", target.target_id);
-            println!("Name: {}", target.name);
-            println!("Status: {}", target.status);
-            println!("Path: {}", target.root_path.display());
+            println!(
+                "{}",
+                tr("cli.item_target", lang).replace("{}", &target.target_id)
+            );
+            println!("{}", tr("cli.item_name", lang).replace("{}", &target.name));
+            println!(
+                "{}",
+                tr("cli.item_status", lang).replace("{}", &target.status)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
         TargetCommands::Add { name, path } => {
@@ -942,16 +1263,28 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             let target = config.add_target(name, path)?;
             config::validate_target_root(&target.root_path)?;
             config.save()?;
-            println!("Added target: {}", target.target_id);
-            println!("Path: {}", target.root_path.display());
+            println!(
+                "{}",
+                tr("cli.added_target", lang).replace("{}", &target.target_id)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
         TargetCommands::Rename { target, new_name } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.rename_target(&target, new_name)?;
             config.save()?;
-            println!("Renamed target: {}", target.target_id);
-            println!("Path: {}", target.root_path.display());
+            println!(
+                "{}",
+                tr("cli.renamed_target", lang).replace("{}", &target.target_id)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
         TargetCommands::Remove { target, force } => {
@@ -962,9 +1295,10 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             let queued = repo.count_queued_items_by_target(&target_to_remove.target_id)?;
             if queued > 0 && !force {
                 anyhow::bail!(
-                    "Cannot remove target '{}' - {} pending job(s) exist. Process or cancel them first.",
-                    target_to_remove.name,
-                    queued
+                    "{}",
+                    tr("cli.cannot_remove_pending", lang)
+                        .replacen("{}", &target_to_remove.name, 1)
+                        .replacen("{}", &queued.to_string(), 1)
                 );
             }
             if queued > 0 {
@@ -975,15 +1309,24 @@ pub fn handle_targets(app: &App, command: TargetCommands) -> Result<()> {
             }
             let removed = config.remove_target(&target)?;
             config.save()?;
-            println!("Archived target: {}", removed.target_id);
+            println!(
+                "{}",
+                tr("cli.archived_target", lang).replace("{}", &removed.target_id)
+            );
             Ok(())
         }
         TargetCommands::SetDefault { target } => {
             let mut config = AppConfig::load_or_init_in(app.config.app_data_dir.clone())?;
             let target = config.set_default_target_by_id(&target)?;
             config.save()?;
-            println!("Default target: {}", target.target_id);
-            println!("Path: {}", target.root_path.display());
+            println!(
+                "{}",
+                tr("cli.default_target", lang).replace("{}", &target.target_id)
+            );
+            println!(
+                "{}",
+                tr("cli.target_path", lang).replace("{}", &target.root_path.display().to_string())
+            );
             Ok(())
         }
     }
@@ -1017,14 +1360,50 @@ fn import_exit_code(app: &App, batch_id: &str) -> Result<i32> {
     Ok(exit_codes::GENERAL_ERROR)
 }
 
-pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
+/// Open successfully imported markdown notes in Obsidian for the given batch.
+fn open_successful_notes_in_obsidian(app: &App, batch_id: &str) -> Result<()> {
+    use crate::processor::frontmatter;
+
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+    let items = repo.list_items_by_batch(batch_id)?;
+
+    for item in items {
+        if item.status != crate::queue::state_machine::STATUS_SUCCESS {
+            continue;
+        }
+        let Some(stored_path) = &item.stored_path else {
+            continue;
+        };
+        let Ok(target) = app.config.target_by_id(&item.target_id) else {
+            continue;
+        };
+        let Some(ref vault) = target.obsidian_vault else {
+            continue;
+        };
+        if !frontmatter::is_markdown_extension(item.file_ext.as_deref()) {
+            continue;
+        }
+
+        let dest = std::path::Path::new(stored_path);
+        if let Ok(rel) = dest.strip_prefix(&target.root_path) {
+            let obsidian_path = rel.to_string_lossy().replace('\\', "/");
+            if let Err(e) = crate::obsidian::open_note(vault, &obsidian_path) {
+                tracing::warn!(item_id = %item.item_id, error = %e, "failed to open note in Obsidian");
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn handle_explorer(command: ExplorerCommands, lang: &str) -> Result<()> {
     match command {
         ExplorerCommands::Install {
             exe_path,
             icon_path,
-            queue_only,
+            queue_only: _,
         } => {
-            let mut options = crate::explorer::default_install_options(queue_only)?;
+            let mut options = crate::explorer::default_install_options(lang)?;
             if let Some(exe_path) = exe_path {
                 options.exe_path = exe_path;
                 if icon_path.is_none() {
@@ -1036,36 +1415,59 @@ pub fn handle_explorer(command: ExplorerCommands) -> Result<()> {
                 options.icon_path = icon_path;
             }
 
-            let registrations = crate::explorer::install(&options)?;
-            for registration in registrations {
-                println!("Registered: HKCU\\{}", registration.menu_key);
-                println!("Command: {}", registration.command);
-                if let Some(icon_path) = registration.icon_path {
-                    println!("Icon: {}", icon_path.display());
+            let menus = crate::explorer::install(&options)?;
+            for menu in &menus {
+                println!("{}: HKCU\\{}", tr("cli.registered", lang), menu.menu_key);
+                for sub in &menu.sub_items {
+                    println!("  [{}] {}", sub.sub_key, sub.command);
+                }
+                if let Some(icon_path) = &menu.icon_path {
+                    println!("{}: {}", tr("cli.icon", lang), icon_path.display());
                 }
             }
             Ok(())
         }
         ExplorerCommands::Uninstall => {
             crate::explorer::uninstall()?;
-            println!("Removed Explorer context-menu entries");
+            println!("{}", tr("cli.explorer_removed", lang));
+            Ok(())
+        }
+        ExplorerCommands::ComFeasibility => {
+            let report = crate::explorer::com_probe::probe()?;
+            println!("{}", tr("cli.com_feasibility", lang));
+            for line in report.lines() {
+                println!("{line}");
+            }
             Ok(())
         }
         ExplorerCommands::RunImport { .. } => {
-            anyhow::bail!("explorer run-import is only intended for the hidden GUI launcher")
+            anyhow::bail!("{}", tr("cli.explorer_run_import_hidden", lang))
         }
     }
 }
 
-pub fn handle_explorer_run_import(app: &App, queue_only: bool, paths: Vec<PathBuf>) -> Result<i32> {
-    let outcome = handle_import(app, None, paths)?;
+pub fn handle_explorer_run_import(
+    app: &App,
+    queue_only: bool,
+    template: Option<String>,
+    tags: Option<String>,
+    paths: Vec<PathBuf>,
+) -> Result<i32> {
+    let cli_tags: Vec<String> = tags
+        .as_deref()
+        .map(|s| {
+            s.split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let lang = app.config.language();
+    let outcome = handle_import(app, None, template, &cli_tags, paths)?;
     if queue_only {
         let toast = ToastContent {
-            title: "KBIntake".to_string(),
-            line1: format!(
-                "Queued {} item(s) for {}.",
-                outcome.item_count, outcome.target_name
-            ),
+            title: tr("toast.title", lang),
+            line1: queued_toast_line(&outcome, lang),
             line2: Some(format!("Batch {}", outcome.batch_id)),
         };
         show_explorer_toast(&toast);
@@ -1074,7 +1476,7 @@ pub fn handle_explorer_run_import(app: &App, queue_only: bool, paths: Vec<PathBu
 
     scheduler::drain_queue(app)?;
     let summary = summarize_batch(app, &outcome.batch_id)?;
-    let toast = toast_for_batch(&summary);
+    let toast = toast_for_batch(&summary, &outcome.routing_summary, lang);
     show_explorer_toast(&toast);
 
     if summary.failed > 0 && summary.imported == 0 && summary.duplicates == 0 {
@@ -1088,8 +1490,8 @@ pub fn handle_explorer_run_import(app: &App, queue_only: bool, paths: Vec<PathBu
 
 pub fn handle_explorer_run_import_error(err: &anyhow::Error) {
     let toast = ToastContent {
-        title: "KBIntake".to_string(),
-        line1: "Import failed before processing finished.".to_string(),
+        title: tr("toast.title", "en"),
+        line1: tr("toast.import_failed_before", "en"),
         line2: Some(err.to_string()),
     };
     let icon_path = std::env::current_exe()
@@ -1128,26 +1530,63 @@ fn summarize_batch(app: &App, batch_id: &str) -> Result<ExplorerBatchSummary> {
     })
 }
 
-fn toast_for_batch(summary: &ExplorerBatchSummary) -> ToastContent {
+fn queued_toast_line(outcome: &ImportOutcome, lang: &str) -> String {
+    match &outcome.routing_summary {
+        RoutingSummary::Single(rule) => tr("toast.queued_single", lang)
+            .replace("{count}", &outcome.item_count.to_string())
+            .replace("{target}", &outcome.target_name)
+            .replace("{rule}", rule),
+        RoutingSummary::Multiple => tr("toast.queued_multiple", lang)
+            .replace("{count}", &outcome.item_count.to_string())
+            .replace("{target}", &outcome.target_name),
+        RoutingSummary::None => tr("toast.queued_none", lang)
+            .replace("{count}", &outcome.item_count.to_string())
+            .replace("{target}", &outcome.target_name),
+    }
+}
+
+fn toast_for_batch(
+    summary: &ExplorerBatchSummary,
+    routing_summary: &RoutingSummary,
+    lang: &str,
+) -> ToastContent {
     if summary.failed == 0 {
         let detail = if summary.duplicates > 0 {
-            format!("{} duplicate skipped.", summary.duplicates)
+            tr("toast.duplicate_skipped", lang).replace("{count}", &summary.duplicates.to_string())
         } else {
-            "No duplicates skipped.".to_string()
+            tr("toast.no_duplicates", lang)
+        };
+        let line1 = match routing_summary {
+            RoutingSummary::Single(rule) => tr("toast.imported_single", lang)
+                .replace("{count}", &summary.imported.to_string())
+                .replace("{target}", &summary.target_name)
+                .replace("{rule}", rule),
+            RoutingSummary::Multiple => tr("toast.imported_multiple", lang)
+                .replace("{count}", &summary.imported.to_string())
+                .replace("{target}", &summary.target_name),
+            RoutingSummary::None => tr("toast.imported_none", lang)
+                .replace("{count}", &summary.imported.to_string())
+                .replace("{target}", &summary.target_name),
         };
         ToastContent {
-            title: "KBIntake".to_string(),
-            line1: format!(
-                "Imported {} file(s) into {}.",
-                summary.imported, summary.target_name
-            ),
+            title: tr("toast.title", lang),
+            line1,
             line2: Some(detail),
         }
     } else {
+        let line1 = match routing_summary {
+            RoutingSummary::Single(rule) => tr("toast.finish_failures_single", lang)
+                .replace("{count}", &summary.failed.to_string())
+                .replace("{rule}", rule),
+            RoutingSummary::Multiple => tr("toast.finish_failures_multiple", lang)
+                .replace("{count}", &summary.failed.to_string()),
+            RoutingSummary::None => tr("toast.finish_failures_none", lang)
+                .replace("{count}", &summary.failed.to_string()),
+        };
         ToastContent {
-            title: "KBIntake".to_string(),
-            line1: format!("Import finished with {} failure(s).", summary.failed),
-            line2: Some(format!("Run: kbintake jobs retry {}", summary.batch_id)),
+            title: tr("toast.title", lang),
+            line1,
+            line2: Some(tr("toast.retry_hint", lang).replace("{batch_id}", &summary.batch_id)),
         }
     }
 }
@@ -1176,12 +1615,14 @@ struct VaultStatsRow {
 pub fn handle_vault(app: &App, command: VaultCommands) -> Result<()> {
     match command {
         VaultCommands::Stats { target, json } => handle_vault_stats(app, target, json),
+        VaultCommands::Audit { target, fix, json } => handle_vault_audit(app, target, fix, json),
     }
 }
 
 fn handle_vault_stats(app: &App, target_filter: Option<String>, json: bool) -> Result<()> {
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
+    let lang = app.config.language();
     let mut rows = Vec::new();
     let targets = if let Some(target_filter) = target_filter {
         let target = app.config.target_any_by_id(&target_filter)?;
@@ -1226,21 +1667,38 @@ fn handle_vault_stats(app: &App, target_filter: Option<String>, json: bool) -> R
     }
 
     if rows.is_empty() {
-        println!("No active targets configured.");
+        println!("{}", tr("cli.no_active_targets", lang));
         return Ok(());
     }
 
     for row in rows {
         let default_marker = if row.is_default { " (default)" } else { "" };
-        println!("Target: {}{}", row.name, default_marker);
-        println!("  Path:          {}", row.root_path);
-        println!("  Files imported: {}", row.files_imported);
-        println!("  Storage used:  {}", format_bytes(row.storage_bytes));
+        println!(
+            "{}",
+            tr("cli.vault_target", lang)
+                .replace("{0}", &row.name)
+                .replace("{1}", default_marker)
+        );
+        println!(
+            "{}",
+            tr("cli.vault_path", lang).replace("{}", &row.root_path)
+        );
+        println!(
+            "{}",
+            tr("cli.vault_files", lang).replace("{}", &row.files_imported.to_string())
+        );
+        println!(
+            "{}",
+            tr("cli.vault_storage", lang).replace("{}", &format_bytes(row.storage_bytes))
+        );
         println!(
             "  Duplicates:    {:.0}%  ({} skipped)",
             row.duplicate_percent, row.duplicate_count
         );
-        println!("  Failed:        {}", row.failed_count);
+        println!(
+            "{}",
+            tr("cli.vault_failed", lang).replace("{}", &row.failed_count.to_string())
+        );
         println!(
             "  Last import:   {}",
             row.last_import_at
@@ -1275,6 +1733,304 @@ fn format_timestamp(value: &str) -> String {
         .unwrap_or_else(|_| value.to_string())
 }
 
+fn handle_vault_audit(
+    app: &App,
+    target_filter: Option<String>,
+    fix: bool,
+    json: bool,
+) -> Result<()> {
+    use crate::processor::audit;
+
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+    let lang = app.config.language();
+
+    let targets = if let Some(target_filter) = target_filter {
+        let target = app.config.target_any_by_id(&target_filter)?;
+        vec![target.clone()]
+    } else {
+        app.config
+            .targets
+            .iter()
+            .filter(|t| t.is_active())
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+
+    if targets.is_empty() {
+        println!("{}", tr("cli.no_active_targets", lang));
+        return Ok(());
+    }
+
+    let mut reports = Vec::new();
+    for target in &targets {
+        let report = audit::audit_vault(target, &repo)?;
+        reports.push(report);
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&reports)?);
+        return Ok(());
+    }
+
+    for report in &reports {
+        let issue_count = report.orphan_files.len()
+            + report.missing_files.len()
+            + report.duplicate_records.len()
+            + report.malformed_frontmatter.len();
+
+        println!(
+            "{}",
+            tr("cli.audit_target_header", lang)
+                .replace("{0}", &report.target_name)
+                .replace("{1}", &issue_count.to_string())
+        );
+
+        if !report.orphan_files.is_empty() {
+            println!(
+                "{}",
+                tr("cli.audit_orphan", lang).replace("{}", &report.orphan_files.len().to_string())
+            );
+            for path in &report.orphan_files {
+                println!("  {path}");
+            }
+        }
+
+        if !report.missing_files.is_empty() {
+            println!(
+                "{}",
+                tr("cli.audit_missing", lang)
+                    .replace("{}", &report.missing_files.len().to_string())
+            );
+            for entry in &report.missing_files {
+                println!("  {} ({})", entry.source_name, entry.stored_path);
+            }
+        }
+
+        if !report.duplicate_records.is_empty() {
+            let dup_count: usize = report
+                .duplicate_records
+                .iter()
+                .map(|g| g.records.len().saturating_sub(1))
+                .sum();
+            println!(
+                "{}",
+                tr("cli.audit_duplicate", lang).replace("{}", &dup_count.to_string())
+            );
+            for group in &report.duplicate_records {
+                println!(
+                    "  SHA-256: {} ({} records)",
+                    group.sha256,
+                    group.records.len()
+                );
+                for entry in &group.records {
+                    println!("    {} → {}", entry.source_name, entry.stored_path);
+                }
+            }
+        }
+
+        if !report.malformed_frontmatter.is_empty() {
+            println!(
+                "{}",
+                tr("cli.audit_malformed", lang)
+                    .replace("{}", &report.malformed_frontmatter.len().to_string())
+            );
+            for path in &report.malformed_frontmatter {
+                println!("  {path}");
+            }
+        }
+
+        if issue_count == 0 {
+            println!("{}", tr("cli.audit_clean", lang));
+        }
+
+        if fix && issue_count > 0 {
+            let fix_result = audit::fix_audit_issues(
+                app.config
+                    .targets
+                    .iter()
+                    .find(|t| t.name == report.target_name)
+                    .unwrap(),
+                &repo,
+                report,
+            )?;
+            println!(
+                "{}",
+                tr("cli.audit_fix_summary", lang)
+                    .replace("{0}", &fix_result.cleaned_missing.to_string())
+                    .replace("{1}", &fix_result.deduplicated.to_string())
+            );
+        }
+
+        println!();
+    }
+
+    Ok(())
+}
+
+/// Start the file watcher for the given paths (or config defaults).
+/// This is a long-running operation that does not return.
+pub fn handle_watch(app: &App, paths: Option<Vec<PathBuf>>) -> Result<i32> {
+    // CLI watch mode runs until Ctrl-C; never shuts down via flag.
+    let shutdown_flag = Arc::new(AtomicBool::new(false));
+    crate::agent::watcher::run_watcher(app, paths, shutdown_flag).map(|()| exit_codes::SUCCESS)
+}
+
+pub fn handle_obsidian(command: ObsidianCommands) -> Result<()> {
+    match command {
+        ObsidianCommands::Open { vault, note } => {
+            crate::obsidian::open_note(&vault, &note)?;
+            Ok(())
+        }
+    }
+}
+
+/// Undo a batch by ID — used by the TUI Jobs tab.
+pub fn handle_undo_batch_via_tui(app_data_dir: &std::path::Path, batch_id: &str) -> Result<String> {
+    let app = App::bootstrap_in(app_data_dir.to_path_buf())?;
+    let conn = app.open_conn()?;
+    let repo = Repository::new(&conn);
+
+    let batch = repo.get_batch(batch_id)?;
+    if batch.status == crate::queue::state_machine::STATUS_UNDONE
+        || batch.status == crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
+    {
+        return Ok("Batch already undone.".to_string());
+    }
+    if batch.status == crate::queue::state_machine::STATUS_QUEUED
+        || batch.status == crate::queue::state_machine::STATUS_RUNNING
+    {
+        anyhow::bail!("Cannot undo batch while it is {}.", batch.status);
+    }
+
+    let items = repo.list_items_by_batch(batch_id)?;
+    let mut deleted_count = 0usize;
+    let mut skipped_count = 0usize;
+
+    for item in items {
+        if item.status != crate::queue::state_machine::STATUS_SUCCESS {
+            continue;
+        }
+        let Some(stored_path) = item.stored_path.clone() else {
+            let msg = format!("File path missing for item '{}'.", item.item_id);
+            repo.mark_item_undo_skipped_modified(&item.item_id, &msg)?;
+            skipped_count += 1;
+            continue;
+        };
+        let path = PathBuf::from(&stored_path);
+        if path.exists() {
+            let hash_ok = if let Some(expected) = item.stored_sha256.as_deref() {
+                crate::processor::hasher::sha256_file(&path)? == expected
+            } else {
+                true
+            };
+            if !hash_ok {
+                let msg = format!("File '{}' modified since import, skipped.", stored_path);
+                repo.mark_item_undo_skipped_modified(&item.item_id, &msg)?;
+                skipped_count += 1;
+                continue;
+            }
+            std::fs::remove_file(&path)
+                .with_context(|| format!("failed to remove {}", path.display()))?;
+        }
+        repo.delete_manifest_by_item(&item.item_id)?;
+        repo.mark_item_undone(&item.item_id)?;
+        deleted_count += 1;
+    }
+
+    let batch_status = if skipped_count > 0 {
+        crate::queue::state_machine::STATUS_PARTIALLY_UNDONE
+    } else {
+        crate::queue::state_machine::STATUS_UNDONE
+    };
+    repo.update_batch_status(batch_id, batch_status)?;
+
+    Ok(format!(
+        "Undo complete: {} deleted, {} skipped.",
+        deleted_count, skipped_count
+    ))
+}
+
+/// Run doctor checks and return issue descriptions — used by the TUI Service tab.
+pub fn run_doctor_checks(app: &App) -> Result<Vec<String>> {
+    let mut issues = Vec::new();
+    let lang = app.config.language();
+
+    let config_path = app.config.config_path();
+    if !config_path.exists() {
+        issues.push(format!("Config file missing at {}", config_path.display()));
+    }
+
+    match app.open_conn() {
+        Ok(conn) => {
+            if let Err(err) = crate::db::validate_schema(&conn) {
+                issues.push(format!("Database schema: {err}"));
+            }
+        }
+        Err(err) => {
+            issues.push(format!("Database: {err}"));
+        }
+    }
+
+    match app.config.default_target() {
+        Ok(target) => {
+            if !target.root_path.exists() {
+                issues.push(format!(
+                    "Target directory missing: {}",
+                    target.root_path.display()
+                ));
+            }
+        }
+        Err(err) => {
+            issues.push(format!("Default target: {err}"));
+        }
+    }
+
+    for target in &app.config.targets {
+        if !target.is_active() {
+            continue;
+        }
+        if let Some(subfolder) = &target.default_subfolder {
+            if subfolder.trim().is_empty() {
+                issues.push(format!(
+                    "target '{}' has empty default_subfolder",
+                    target.target_id
+                ));
+            } else if std::path::Path::new(subfolder).is_absolute() {
+                issues.push(format!(
+                    "target '{}' default_subfolder must be relative",
+                    target.target_id
+                ));
+            } else {
+                let resolved = target.root_path.join(subfolder);
+                if resolved.exists() && !resolved.is_dir() {
+                    issues.push(format!(
+                        "target '{}' subfolder exists but is not a directory: {}",
+                        target.target_id,
+                        resolved.display()
+                    ));
+                } else if !resolved.exists() {
+                    issues.push(format!(
+                        "target '{}' subfolder does not exist: {}",
+                        target.target_id,
+                        resolved.display()
+                    ));
+                }
+            }
+        }
+    }
+
+    if !crate::explorer::is_installed().unwrap_or(false) {
+        issues.push(tr("explorer.install_unsupported", lang).to_string());
+    }
+
+    for warning in app.config.routing_warnings() {
+        issues.push(warning);
+    }
+
+    Ok(issues)
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1282,9 +2038,9 @@ mod tests {
     use rusqlite::Connection;
 
     use super::{
-        format_event_line, format_job_show_row, handle_config, handle_import,
-        handle_import_command, handle_targets, toast_for_batch, ConfigCommands,
-        ExplorerBatchSummary, TargetCommands,
+        format_event_line, format_job_show_row, handle_config, handle_explorer, handle_import,
+        handle_import_command, handle_targets, queued_toast_line, toast_for_batch, ConfigCommands,
+        ExplorerBatchSummary, RoutingSummary, TargetCommands,
     };
     use crate::app::App;
     use crate::config::{AgentConfig, AppConfig, ImportConfig};
@@ -1308,11 +2064,17 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                    language: None,
+                    auto_open_obsidian: false,
                 },
                 agent: AgentConfig {
                     poll_interval_secs: 5,
+                    watch_in_service: false,
                 },
                 routing: Vec::new(),
+                templates: Vec::new(),
+                routing_rules: Vec::new(),
+                watch: Vec::new(),
             },
             db_path,
         }
@@ -1326,7 +2088,7 @@ mod tests {
         let missing = temp.path().join("missing.md");
         fs::write(&valid, "hello").unwrap();
 
-        let err = handle_import(&app, None, vec![valid, missing]).unwrap_err();
+        let err = handle_import(&app, None, None, &[], vec![valid, missing]).unwrap_err();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1341,7 +2103,7 @@ mod tests {
         let empty_dir = temp.path().join("empty");
         fs::create_dir(&empty_dir).unwrap();
 
-        let err = handle_import(&app, None, vec![empty_dir]).unwrap_err();
+        let err = handle_import(&app, None, None, &[], vec![empty_dir]).unwrap_err();
 
         assert!(err.to_string().contains("no importable files found"));
     }
@@ -1384,7 +2146,7 @@ mod tests {
         .unwrap();
         let reloaded = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
 
-        let outcome = handle_import(&reloaded, None, vec![source]).unwrap();
+        let outcome = handle_import(&reloaded, None, None, &[], vec![source]).unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1503,7 +2265,7 @@ mod tests {
         let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
-        handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+        handle_import(&app, Some("archive".to_string()), None, &[], vec![source]).unwrap();
 
         let err = handle_targets(
             &app,
@@ -1537,7 +2299,7 @@ mod tests {
         let app = App::bootstrap_in(app.config.app_data_dir.clone()).unwrap();
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
-        handle_import(&app, Some("archive".to_string()), vec![source]).unwrap();
+        handle_import(&app, Some("archive".to_string()), None, &[], vec![source]).unwrap();
 
         handle_targets(
             &app,
@@ -1596,7 +2358,7 @@ mod tests {
         )
         .unwrap_err();
         let import_err =
-            handle_import(&app, Some("archive".to_string()), vec![source]).unwrap_err();
+            handle_import(&app, Some("archive".to_string()), None, &[], vec![source]).unwrap_err();
 
         assert!(rename_err.to_string().contains("archived"));
         assert!(default_err.to_string().contains("archived"));
@@ -1645,7 +2407,14 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        handle_import(&reloaded, Some("archive".to_string()), vec![source]).unwrap();
+        handle_import(
+            &reloaded,
+            Some("archive".to_string()),
+            None,
+            &[],
+            vec![source],
+        )
+        .unwrap();
 
         let conn = reloaded.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1656,13 +2425,80 @@ mod tests {
     }
 
     #[test]
+    fn import_uses_v2_routing_rule_target_without_explicit_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        app.config.routing_rules.push(crate::config::RoutingRuleV2 {
+            extension: Some(crate::config::StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "pdf-template".to_string(),
+            target: Some("archive".to_string()),
+        });
+        let source = temp.path().join("paper.pdf");
+        fs::write(&source, "pdf").unwrap();
+
+        let outcome = handle_import(&app, None, None, &[], vec![source]).unwrap();
+
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let batch = repo.get_batch(&outcome.batch_id).unwrap();
+        let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+        assert_eq!(outcome.target_name, "archive");
+        assert_eq!(
+            outcome.routing_summary,
+            RoutingSummary::Single("pdf-template".to_string())
+        );
+        assert_eq!(batch.target_id, "archive");
+        assert_eq!(items[0].target_id, "archive");
+    }
+
+    #[test]
+    fn explicit_target_overrides_v2_routing_rule_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config
+            .add_target("archive", temp.path().join("archive"))
+            .unwrap();
+        app.config.routing_rules.push(crate::config::RoutingRuleV2 {
+            extension: Some(crate::config::StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "pdf-template".to_string(),
+            target: Some("archive".to_string()),
+        });
+        let source = temp.path().join("paper.pdf");
+        fs::write(&source, "pdf").unwrap();
+
+        let outcome =
+            handle_import(&app, Some("default".to_string()), None, &[], vec![source]).unwrap();
+
+        let conn = app.open_conn().unwrap();
+        let repo = Repository::new(&conn);
+        let batch = repo.get_batch(&outcome.batch_id).unwrap();
+        let items = repo.list_items_by_batch(&batch.batch_id).unwrap();
+        assert_eq!(outcome.target_name, "default");
+        assert_eq!(outcome.routing_summary, RoutingSummary::None);
+        assert_eq!(batch.target_id, "default");
+        assert_eq!(items[0].target_id, "default");
+    }
+
+    #[test]
     fn import_with_unknown_target_fails_before_creating_batch() {
         let temp = tempfile::tempdir().unwrap();
         let app = test_app(&temp);
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        let err = handle_import(&app, Some("missing".to_string()), vec![source]).unwrap_err();
+        let err =
+            handle_import(&app, Some("missing".to_string()), None, &[], vec![source]).unwrap_err();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
@@ -1680,8 +2516,19 @@ mod tests {
         fs::write(&empty, "").unwrap();
         fs::write(&large, "too large").unwrap();
 
-        let code =
-            handle_import_command(&app, None, true, false, false, vec![empty, large]).unwrap();
+        let code = handle_import_command(
+            &app,
+            None,
+            None,
+            None,
+            true,
+            false,
+            false,
+            false,
+            false,
+            vec![empty, large],
+        )
+        .unwrap();
 
         assert_eq!(code, exit_codes::PARTIAL_SUCCESS);
     }
@@ -1694,7 +2541,19 @@ mod tests {
         let large = temp.path().join("large.md");
         fs::write(&large, "too large").unwrap();
 
-        let code = handle_import_command(&app, None, true, false, false, vec![large]).unwrap();
+        let code = handle_import_command(
+            &app,
+            None,
+            None,
+            None,
+            true,
+            false,
+            false,
+            false,
+            false,
+            vec![large],
+        )
+        .unwrap();
 
         assert_eq!(code, exit_codes::FILE_SIZE_EXCEEDED);
     }
@@ -1733,34 +2592,75 @@ mod tests {
 
     #[test]
     fn explorer_success_toast_mentions_import_and_duplicates() {
-        let toast = toast_for_batch(&ExplorerBatchSummary {
-            batch_id: "batch-1".to_string(),
-            imported: 3,
-            duplicates: 1,
-            failed: 0,
-            target_name: "notes".to_string(),
-        });
+        let toast = toast_for_batch(
+            &ExplorerBatchSummary {
+                batch_id: "batch-1".to_string(),
+                imported: 3,
+                duplicates: 1,
+                failed: 0,
+                target_name: "notes".to_string(),
+            },
+            &RoutingSummary::Single("research-paper".to_string()),
+            "en",
+        );
 
         assert_eq!(toast.title, "KBIntake");
-        assert!(toast.line1.contains("Imported 3 file(s) into notes."));
+        assert!(toast
+            .line1
+            .contains("Imported 3 file(s) into notes using rule research-paper."));
         assert_eq!(toast.line2.as_deref(), Some("1 duplicate skipped."));
     }
 
     #[test]
     fn explorer_failure_toast_includes_retry_hint() {
-        let toast = toast_for_batch(&ExplorerBatchSummary {
-            batch_id: "batch-9".to_string(),
-            imported: 1,
-            duplicates: 0,
-            failed: 2,
-            target_name: "notes".to_string(),
-        });
+        let toast = toast_for_batch(
+            &ExplorerBatchSummary {
+                batch_id: "batch-9".to_string(),
+                imported: 1,
+                duplicates: 0,
+                failed: 2,
+                target_name: "notes".to_string(),
+            },
+            &RoutingSummary::Multiple,
+            "en",
+        );
 
         assert_eq!(toast.title, "KBIntake");
         assert!(toast.line1.contains("2 failure"));
+        assert!(toast.line1.contains("multiple rules"));
         assert_eq!(
             toast.line2.as_deref(),
             Some("Run: kbintake jobs retry batch-9")
         );
+    }
+
+    #[test]
+    fn queued_toast_line_mentions_single_routing_rule() {
+        let line = queued_toast_line(
+            &super::ImportOutcome {
+                batch_id: "batch-1".to_string(),
+                item_count: 2,
+                target_name: "notes".to_string(),
+                routing_summary: RoutingSummary::Single("research-paper".to_string()),
+            },
+            "en",
+        );
+
+        assert!(line.contains("Queued 2 item(s) for notes using rule research-paper."));
+    }
+
+    #[test]
+    fn explorer_com_feasibility_command_executes() {
+        handle_explorer(super::ExplorerCommands::ComFeasibility, "en").unwrap();
+    }
+
+    #[test]
+    fn run_doctor_checks_flags_missing_subfolder_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config.targets[0].default_subfolder = Some("nonexistent-subfolder".to_string());
+
+        let issues = super::run_doctor_checks(&app).unwrap();
+        assert!(issues.iter().any(|i| i.contains("nonexistent-subfolder")));
     }
 }

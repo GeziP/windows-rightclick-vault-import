@@ -124,9 +124,9 @@ impl<'a> Repository<'a> {
         self.conn.execute(
             "INSERT INTO items (
                 item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
-                source_size, sha256, stored_path, duplicate_of, error_code, error_message,
-                created_at, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
+                cli_tags, import_subfolder, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 &item.item_id,
                 &item.batch_id,
@@ -138,10 +138,13 @@ impl<'a> Repository<'a> {
                 item.stage.as_deref(),
                 item.source_size,
                 item.sha256.as_deref(),
+                item.stored_sha256.as_deref(),
                 item.stored_path.as_deref(),
                 item.duplicate_of.as_deref(),
                 item.error_code.as_deref(),
                 item.error_message.as_deref(),
+                item.cli_tags.as_deref(),
+                item.import_subfolder.as_deref(),
                 item.created_at.to_rfc3339(),
                 item.updated_at.to_rfc3339()
             ],
@@ -152,8 +155,8 @@ impl<'a> Repository<'a> {
     pub fn list_items_by_batch(&self, batch_id: &str) -> Result<Vec<ItemJob>> {
         let mut stmt = self.conn.prepare(
             "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
-                    source_size, sha256, stored_path, duplicate_of, error_code, error_message,
-                    created_at, updated_at
+                    source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
+                    cli_tags, import_subfolder, created_at, updated_at
              FROM items WHERE batch_id = ?1 ORDER BY created_at ASC",
         )?;
         let rows = stmt.query_map(params![batch_id], row_to_item)?;
@@ -208,8 +211,8 @@ impl<'a> Repository<'a> {
         self.conn
             .query_row(
                 "SELECT item_id, batch_id, target_id, source_path, source_name, file_ext, status, stage,
-                        source_size, sha256, stored_path, duplicate_of, error_code, error_message,
-                        created_at, updated_at
+                        source_size, sha256, stored_sha256, stored_path, duplicate_of, error_code, error_message,
+                        cli_tags, import_subfolder, created_at, updated_at
                  FROM items WHERE status = ?1 ORDER BY created_at ASC LIMIT 1",
                 params![state_machine::STATUS_QUEUED],
                 row_to_item,
@@ -241,10 +244,21 @@ impl<'a> Repository<'a> {
         Ok(())
     }
 
-    pub fn mark_item_success(&self, item_id: &str, stored_path: &str) -> Result<()> {
+    pub fn mark_item_success(
+        &self,
+        item_id: &str,
+        stored_path: &str,
+        stored_sha256: &str,
+    ) -> Result<()> {
         let rows = self.conn.execute(
-            "UPDATE items SET status = ?1, stored_path = ?2, stage = NULL, updated_at = ?3 WHERE item_id = ?4",
-            params![state_machine::STATUS_SUCCESS, stored_path, Utc::now().to_rfc3339(), item_id],
+            "UPDATE items SET status = ?1, stored_path = ?2, stored_sha256 = ?3, stage = NULL, updated_at = ?4 WHERE item_id = ?5",
+            params![
+                state_machine::STATUS_SUCCESS,
+                stored_path,
+                stored_sha256,
+                Utc::now().to_rfc3339(),
+                item_id
+            ],
         )?;
         ensure_updated(rows, "item", item_id)?;
         Ok(())
@@ -353,15 +367,61 @@ impl<'a> Repository<'a> {
             .map_err(Into::into)
     }
 
-    pub fn find_manifest_by_hash(&self, target_id: &str, sha256: &str) -> Result<Option<String>> {
+    pub fn find_manifest_by_hash(
+        &self,
+        target_id: &str,
+        sha256: &str,
+    ) -> Result<Option<(String, String)>> {
         self.conn
             .query_row(
-                "SELECT record_id FROM manifest_records WHERE target_id = ?1 AND sha256 = ?2",
+                "SELECT record_id, stored_path FROM manifest_records WHERE target_id = ?1 AND sha256 = ?2",
                 params![target_id, sha256],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    pub fn list_manifests_by_target(
+        &self,
+        target_id: &str,
+    ) -> Result<Vec<crate::processor::audit::ManifestEntry>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT record_id, stored_path, source_name, sha256 FROM manifest_records WHERE target_id = ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![target_id], |row| {
+                Ok(crate::processor::audit::ManifestEntry {
+                    record_id: row.get(0)?,
+                    stored_path: row.get(1)?,
+                    source_name: row.get(2)?,
+                    sha256: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    pub fn mark_manifest_missing(&self, record_id: &str) -> Result<()> {
+        let rows = self.conn.execute(
+            "DELETE FROM manifest_records WHERE record_id = ?1",
+            params![record_id],
+        )?;
+        if rows == 0 {
+            return Err(anyhow::anyhow!("record not found: {record_id}"));
+        }
+        Ok(())
+    }
+
+    pub fn mark_manifest_duplicate(&self, record_id: &str) -> Result<()> {
+        let rows = self.conn.execute(
+            "DELETE FROM manifest_records WHERE record_id = ?1",
+            params![record_id],
+        )?;
+        if rows == 0 {
+            return Err(anyhow::anyhow!("record not found: {record_id}"));
+        }
+        Ok(())
     }
 
     pub fn insert_event(&self, event: &DomainEvent) -> Result<()> {
@@ -463,12 +523,15 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<ItemJob> {
         stage: row.get(7)?,
         source_size: row.get(8)?,
         sha256: row.get(9)?,
-        stored_path: row.get(10)?,
-        duplicate_of: row.get(11)?,
-        error_code: row.get(12)?,
-        error_message: row.get(13)?,
-        created_at: parse_utc(row.get(14)?)?,
-        updated_at: parse_utc(row.get(15)?)?,
+        stored_sha256: row.get(10)?,
+        stored_path: row.get(11)?,
+        duplicate_of: row.get(12)?,
+        error_code: row.get(13)?,
+        error_message: row.get(14)?,
+        cli_tags: row.get(15)?,
+        import_subfolder: row.get(16)?,
+        created_at: parse_utc(row.get(17)?)?,
+        updated_at: parse_utc(row.get(18)?)?,
     })
 }
 
@@ -525,7 +588,9 @@ mod tests {
         assert!(repo.update_batch_status("missing", "running").is_err());
         assert!(repo.update_item_running("missing", "hashing").is_err());
         assert!(repo.update_item_hash("missing", "abc", 3).is_err());
-        assert!(repo.mark_item_success("missing", "stored.md").is_err());
+        assert!(repo
+            .mark_item_success("missing", "stored.md", "stored-hash")
+            .is_err());
         assert!(repo.mark_item_duplicate("missing", "record").is_err());
         assert!(repo
             .mark_item_failed("missing", "E_TEST", "failed")
@@ -541,7 +606,7 @@ mod tests {
         let (conn, batch, item) = repo_with_conn();
         let repo = Repository::new(&conn);
 
-        repo.mark_item_success(&item.item_id, "vault/source.md")
+        repo.mark_item_success(&item.item_id, "vault/source.md", "stored-hash")
             .unwrap();
         repo.refresh_batch_status(&batch.batch_id).unwrap();
 
@@ -562,7 +627,7 @@ mod tests {
         );
         repo.insert_item(&second).unwrap();
 
-        repo.mark_item_success(&item.item_id, "vault/source.md")
+        repo.mark_item_success(&item.item_id, "vault/source.md", "stored-hash")
             .unwrap();
         repo.mark_item_failed(&second.item_id, "E_TEST", "failed")
             .unwrap();
@@ -593,7 +658,9 @@ mod tests {
         repo.insert_manifest(&record).unwrap();
 
         assert_eq!(
-            repo.find_manifest_by_hash("default", "abc123").unwrap(),
+            repo.find_manifest_by_hash("default", "abc123")
+                .unwrap()
+                .map(|(id, _)| id),
             Some(record_id)
         );
     }
@@ -610,7 +677,7 @@ mod tests {
         repo.insert_item(&second).unwrap();
         repo.mark_item_failed(&item.item_id, "E_TEST", "failed")
             .unwrap();
-        repo.mark_item_success(&second.item_id, "vault/other.md")
+        repo.mark_item_success(&second.item_id, "vault/other.md", "stored-hash")
             .unwrap();
 
         let retried = repo.retry_failed_items_by_batch(&batch.batch_id).unwrap();

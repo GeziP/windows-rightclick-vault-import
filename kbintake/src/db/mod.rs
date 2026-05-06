@@ -4,14 +4,14 @@ use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use rusqlite::{params, Connection};
 
-const LATEST_SCHEMA_VERSION: i64 = 3;
+const LATEST_SCHEMA_VERSION: i64 = 6;
 
 struct Migration {
     version: i64,
     sql: &'static str,
 }
 
-const MIGRATIONS: [Migration; 3] = [
+const MIGRATIONS: [Migration; 6] = [
     Migration {
         version: 1,
         sql: schema::MIGRATION_001_CORE,
@@ -23,6 +23,18 @@ const MIGRATIONS: [Migration; 3] = [
     Migration {
         version: 3,
         sql: schema::MIGRATION_003_EVENT_LOOKUP_INDEX,
+    },
+    Migration {
+        version: 4,
+        sql: schema::MIGRATION_004_ITEM_STORED_SHA256,
+    },
+    Migration {
+        version: 5,
+        sql: schema::MIGRATION_005_ITEM_CLI_TAGS,
+    },
+    Migration {
+        version: 6,
+        sql: schema::MIGRATION_006_ITEM_IMPORT_SUBFOLDER,
     },
 ];
 
@@ -184,7 +196,7 @@ mod tests {
 
         let applied = apply_pending_migrations(&conn).unwrap();
 
-        assert_eq!(applied, vec![3]);
+        assert_eq!(applied, vec![3, 4, 5, 6]);
         assert_eq!(
             current_schema_version(&conn).unwrap(),
             latest_schema_version()

@@ -5,14 +5,24 @@ use serde::Serialize;
 
 use crate::adapter::local_folder::LocalFolderAdapter;
 use crate::app::App;
-use crate::processor::{deduper, hasher, scanner, validator};
+use crate::i18n::tr;
+use crate::processor::{deduper, hasher, scanner, template, validator};
 use crate::queue::repository::Repository;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct DryRunRow {
     pub source: String,
+    pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_rule_template: Option<String>,
     pub destination: Option<String>,
     pub action: DryRunAction,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendered_subfolder: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frontmatter_preview: Option<toml::Table>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -38,23 +48,31 @@ impl DryRunAction {
 pub fn preview_import(
     app: &App,
     target_id: Option<String>,
+    template: Option<String>,
+    cli_tags: &[String],
     paths: Vec<PathBuf>,
 ) -> Result<Vec<DryRunRow>> {
     if paths.is_empty() {
         anyhow::bail!("no input paths provided");
     }
 
-    let explicit_target = match target_id {
-        Some(target_id) => Some(app.config.target_by_id(&target_id)?),
-        None => None,
-    };
+    let explicit_target = target_id;
     let conn = app.open_conn()?;
     let repo = Repository::new(&conn);
     let mut rows = Vec::new();
 
     for path in paths {
         if is_symlink(&path)? {
-            rows.push(row(&path, None, DryRunAction::SkipSymlink));
+            rows.push(row(
+                &path,
+                None,
+                None,
+                None,
+                DryRunAction::SkipSymlink,
+                None,
+                None,
+                None,
+            ));
             continue;
         }
 
@@ -62,14 +80,32 @@ pub fn preview_import(
             .with_context(|| format!("failed to scan path {}", path.display()))?;
         for file in files {
             if is_symlink(&file)? {
-                rows.push(row(&file, None, DryRunAction::SkipSymlink));
+                rows.push(row(
+                    &file,
+                    None,
+                    None,
+                    None,
+                    DryRunAction::SkipSymlink,
+                    None,
+                    None,
+                    None,
+                ));
                 continue;
             }
 
             let size = match validator::validate_file(&file, app.config.import.max_file_size_mb) {
                 Ok(size) => size,
                 Err(err) if err.to_string().contains("exceeds max size") => {
-                    rows.push(row(&file, None, DryRunAction::SkipSizeLimit));
+                    rows.push(row(
+                        &file,
+                        None,
+                        None,
+                        None,
+                        DryRunAction::SkipSizeLimit,
+                        None,
+                        None,
+                        None,
+                    ));
                     continue;
                 }
                 Err(err) => {
@@ -80,12 +116,25 @@ pub fn preview_import(
 
             let hash = hasher::sha256_file(&file)
                 .with_context(|| format!("failed to hash {}", file.display()))?;
-            let target = match &explicit_target {
-                Some(target) => target.clone(),
-                None => app.config.target_for_path(&file)?,
-            };
+            let intent = app.config.resolve_import_intent(
+                &file,
+                size,
+                explicit_target.clone(),
+                template.clone(),
+            )?;
+            let target = intent.target.clone();
+            let matched_rule_template = intent.template_name.clone();
             if deduper::find_duplicate_record(&repo, &target.target_id, &hash)?.is_some() {
-                rows.push(row(&file, None, DryRunAction::SkipDuplicate));
+                rows.push(row(
+                    &file,
+                    Some(target.name.clone()),
+                    matched_rule_template,
+                    None,
+                    DryRunAction::SkipDuplicate,
+                    None,
+                    None,
+                    None,
+                ));
                 continue;
             }
 
@@ -94,9 +143,59 @@ pub fn preview_import(
                 .file_name()
                 .map(|value| value.to_string_lossy().to_string())
                 .unwrap_or_else(|| "file".to_string());
-            let destination = adapter.preview_destination(&source_name);
-            rows.push(row(&file, Some(destination), DryRunAction::Copy));
-            let _ = size;
+            let mut template_name = None;
+            let mut rendered_subfolder = None;
+            let mut frontmatter_preview = None;
+            let resolved_template = match &intent.template_name {
+                Some(name) => Some(template::resolve_template(&app.config.templates, name)?),
+                None => app.config.template_for_path(&file, size).and_then(|tc| {
+                    template::resolve_template(&app.config.templates, &tc.name).ok()
+                }),
+            };
+            let destination = if let Some(resolved) = resolved_template {
+                let rendered = template::render_template(
+                    &resolved,
+                    &template::TemplateRenderContext {
+                        source_path: file.display().to_string(),
+                        source_name: source_name.clone(),
+                        file_ext: file
+                            .extension()
+                            .map(|value| value.to_string_lossy().to_string()),
+                        file_size_bytes: size,
+                        imported_at: chrono::Utc::now(),
+                        sha256: hash.clone(),
+                        target_name: target.name.clone(),
+                        batch_id: "dry-run".to_string(),
+                    },
+                    cli_tags,
+                );
+                let subfolder = rendered.subfolder.clone();
+                let preview_root = match &subfolder {
+                    Some(subfolder) => target.root_path.join(subfolder),
+                    None => target
+                        .default_subfolder
+                        .as_deref()
+                        .filter(|subfolder| !subfolder.trim().is_empty())
+                        .map(|subfolder| target.root_path.join(subfolder))
+                        .unwrap_or_else(|| target.root_path.clone()),
+                };
+                template_name = Some(rendered.name.clone());
+                rendered_subfolder = subfolder;
+                frontmatter_preview = Some(rendered.frontmatter);
+                LocalFolderAdapter::new(preview_root).preview_destination(&source_name)
+            } else {
+                adapter.preview_destination(&source_name)
+            };
+            rows.push(row(
+                &file,
+                Some(target.name.clone()),
+                matched_rule_template,
+                Some(destination),
+                DryRunAction::Copy,
+                template_name,
+                rendered_subfolder,
+                frontmatter_preview,
+            ));
         }
     }
 
@@ -107,23 +206,40 @@ pub fn preview_import(
     Ok(rows)
 }
 
-pub fn print_table(rows: &[DryRunRow]) {
-    println!("Source Path\tDestination\tAction");
+pub fn print_table(rows: &[DryRunRow], lang: &str) {
+    println!("{}", tr("cli.dry_run_table_header", lang));
     for row in rows {
         println!(
-            "{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}",
             row.source,
+            row.target.as_deref().unwrap_or("-"),
+            row.matched_rule_template.as_deref().unwrap_or("-"),
             row.destination.as_deref().unwrap_or("-"),
             row.action.as_str()
         );
     }
 }
 
-fn row(path: &Path, destination: Option<PathBuf>, action: DryRunAction) -> DryRunRow {
+#[allow(clippy::too_many_arguments)]
+fn row(
+    path: &Path,
+    target: Option<String>,
+    matched_rule_template: Option<String>,
+    destination: Option<PathBuf>,
+    action: DryRunAction,
+    template: Option<String>,
+    rendered_subfolder: Option<String>,
+    frontmatter_preview: Option<toml::Table>,
+) -> DryRunRow {
     DryRunRow {
         source: path.display().to_string(),
+        target,
+        matched_rule_template,
         destination: destination.map(|path| path.display().to_string()),
         action,
+        template,
+        rendered_subfolder,
+        frontmatter_preview,
     }
 }
 
@@ -142,10 +258,13 @@ mod tests {
 
     use super::{preview_import, DryRunAction};
     use crate::app::App;
-    use crate::config::{AgentConfig, AppConfig, ImportConfig};
+    use crate::config::{
+        AgentConfig, AppConfig, ImportConfig, RoutingRuleV2, StringList, TemplateConfig,
+    };
     use crate::db;
     use crate::domain::{ManifestRecord, Target};
     use crate::queue::repository::Repository;
+    use toml::Table;
 
     fn test_app(temp: &tempfile::TempDir) -> App {
         let app_data_dir = temp.path().join("appdata");
@@ -162,11 +281,17 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                    language: None,
+                    auto_open_obsidian: false,
                 },
                 agent: AgentConfig {
                     poll_interval_secs: 5,
+                    watch_in_service: false,
                 },
                 routing: Vec::new(),
+                templates: Vec::new(),
+                routing_rules: Vec::new(),
+                watch: Vec::new(),
             },
             db_path,
         }
@@ -179,14 +304,85 @@ mod tests {
         let source = temp.path().join("note.md");
         fs::write(&source, "hello").unwrap();
 
-        let rows = preview_import(&app, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![source]).unwrap();
 
         let conn = app.open_conn().unwrap();
         let repo = Repository::new(&conn);
         assert_eq!(rows[0].action, DryRunAction::Copy);
+        assert_eq!(rows[0].target.as_deref(), Some("default"));
+        assert!(rows[0].matched_rule_template.is_none());
         assert!(rows[0].destination.as_ref().unwrap().ends_with("note.md"));
+        assert!(rows[0].template.is_none());
         assert!(repo.list_batches(10).unwrap().is_empty());
         assert!(!app.config.targets[0].root_path.join("note.md").exists());
+    }
+
+    #[test]
+    fn dry_run_json_preview_renders_template_destination_and_frontmatter() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = test_app(&temp);
+        app.config
+            .add_target("archive", temp.path().join("archive-vault"))
+            .unwrap();
+        let mut frontmatter = Table::new();
+        frontmatter.insert(
+            "title".to_string(),
+            toml::Value::String("{{file_name}}".to_string()),
+        );
+        frontmatter.insert(
+            "source".to_string(),
+            toml::Value::String("{{source_path}}".to_string()),
+        );
+        app.config.templates.push(TemplateConfig {
+            name: "research-paper".to_string(),
+            base_template: None,
+            subfolder: Some("references/{{imported_at_date}}".to_string()),
+            tags: vec!["research".to_string()],
+            frontmatter,
+        });
+        app.config.routing_rules.push(RoutingRuleV2 {
+            extension: Some(StringList::One("pdf".to_string())),
+            source_folder: None,
+            file_name_contains: None,
+            file_size_kb_gt: None,
+            file_size_kb_lt: None,
+            template: "research-paper".to_string(),
+            target: Some("archive".to_string()),
+        });
+        let source = temp.path().join("paper.pdf");
+        fs::write(&source, "preview").unwrap();
+
+        let rows = preview_import(&app, None, None, &[], vec![source.clone()]).unwrap();
+
+        assert_eq!(rows[0].template.as_deref(), Some("research-paper"));
+        assert_eq!(rows[0].target.as_deref(), Some("archive"));
+        assert_eq!(
+            rows[0].matched_rule_template.as_deref(),
+            Some("research-paper")
+        );
+        let expected_subfolder = chrono::Utc::now().format("references/%Y-%m-%d").to_string();
+        assert_eq!(
+            rows[0].rendered_subfolder.as_deref(),
+            Some(expected_subfolder.as_str())
+        );
+        assert!(rows[0]
+            .destination
+            .as_deref()
+            .unwrap()
+            .contains("references"));
+        assert!(rows[0]
+            .destination
+            .as_deref()
+            .unwrap()
+            .contains("archive-vault"));
+        assert_eq!(
+            rows[0].frontmatter_preview.as_ref().unwrap()["title"].as_str(),
+            Some("paper")
+        );
+        assert_eq!(
+            rows[0].frontmatter_preview.as_ref().unwrap()["source"].as_str(),
+            Some(source.display().to_string().as_str())
+        );
     }
 
     #[test]
@@ -210,9 +406,11 @@ mod tests {
         );
         repo.insert_manifest(&record).unwrap();
 
-        let rows = preview_import(&app, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipDuplicate);
+        assert_eq!(rows[0].target.as_deref(), Some("default"));
+        assert!(rows[0].matched_rule_template.is_none());
         assert!(rows[0].destination.is_none());
         assert!(repo.list_batches(10).unwrap().is_empty());
     }
@@ -225,9 +423,11 @@ mod tests {
         let source = temp.path().join("large.md");
         fs::write(&source, "too large").unwrap();
 
-        let rows = preview_import(&app, None, vec![source]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![source]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSizeLimit);
+        assert!(rows[0].target.is_none());
+        assert!(rows[0].matched_rule_template.is_none());
         assert!(rows[0].destination.is_none());
     }
 
@@ -243,9 +443,11 @@ mod tests {
             return;
         }
 
-        let rows = preview_import(&app, None, vec![link]).unwrap();
+        let rows = preview_import(&app, None, None, &[], vec![link]).unwrap();
 
         assert_eq!(rows[0].action, DryRunAction::SkipSymlink);
+        assert!(rows[0].target.is_none());
+        assert!(rows[0].matched_rule_template.is_none());
         assert!(rows[0].destination.is_none());
     }
 }

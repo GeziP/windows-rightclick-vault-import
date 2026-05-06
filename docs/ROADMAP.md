@@ -4,10 +4,10 @@ This roadmap tracks KBIntake after the `v1.0.0` Windows release.
 
 ## Current Release
 
-`v1.0.0` is available from GitHub Releases:
+`v2.1.0` is the latest release. Previous releases: `v2.0.0`, `v1.0.1`, `v1.0.0`.
 
 ```text
-https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
 ```
 
 The release includes:
@@ -17,6 +17,41 @@ The release includes:
 - `kbintakew.exe`
 - `kbintake.ico`
 - `SHA256SUMS.txt`
+
+## v2.0 Status
+
+All planned v2.0 features are implemented on branch `v2.0`:
+
+| Epic | Feature | Status |
+|------|---------|--------|
+| #57 | Windows 11 native context menu | COM DLL validated on hardware |
+| #58 | Import template system | Complete |
+| #59 | Target default subfolder | Complete |
+| #60 | TUI settings | Complete |
+| #61 | zh-CN localization | Complete |
+| #62 | Watch Mode | Complete |
+| #63 | Obsidian URI integration | Complete |
+| #64 | Quick tag injection | Complete |
+| #65 | Vault audit | Complete |
+| #66 | Clipboard import | Complete |
+
+Remaining for v2.0 release:
+
+- Documentation pass (#67)
+- Windows 11 COM DLL go/no-go decision
+- Installer update and version bump
+- Winget manifest for `2.0.0`
+
+## Post-handoff Additions
+
+| Feature | Description |
+|---------|-------------|
+| System tray icon | `kbintakew.exe tray` with right-click menu (Settings, Auto-start, Exit) |
+| Auto-start management | Toggle HKCU\Run registry entry from tray menu |
+| Watch directory preservation | Files imported with original names into matching subdirectories (migration 006) |
+| Stale manifest re-import | Dedup checks stored file existence; deleted vault files auto re-imported |
+| Watch startup scan | Existing files in watch directories imported on watcher start |
+| File-based logging | Tray and service modes log to `%LOCALAPPDATA%\kbintake\logs\` |
 
 ## Completed Milestones
 
@@ -44,10 +79,33 @@ The release includes:
 - archived targets
 - extension-based routing rules
 - per-target vault stats
+- vault audit (orphan/missing/duplicate/malformed detection)
+
+### Templates and Routing
+
+- import template system with variable interpolation and conditional rendering
+- single-level template inheritance
+- v2 multi-condition routing rules with template binding
+- v1 routing compatibility
+- per-target default subfolder
+- quick tag injection (`--tags`)
+- clipboard import (`--clipboard`)
+
+### Usability
+
+- TUI interactive settings (`kbintake tui`)
+- zh-CN localization
+- Obsidian URI integration with auto-open
+- Watch Mode with debounce, extension filter, and template binding
+- Watch Mode directory structure preservation (files keep original names and subdirectory paths)
+- System tray icon with right-click context menu (Settings, Auto-start, Exit)
+- Auto-start management via HKCU\Run registry
+- File-based logging for tray and service modes
 
 ### Explorer And Notifications
 
 - `kbintake explorer install/uninstall`
+- Windows 11 native top-level context menu via COM DLL
 - right-click menu registration for files and folders
 - `kbintakew.exe` Windows-subsystem binary for no-console Explorer imports
 - success, duplicate, and failure toast notifications
@@ -68,43 +126,17 @@ The release includes:
 - hidden `service run` dispatcher
 - service logging under `%LOCALAPPDATA%\kbintake\logs`
 - queue processing from Windows Service mode
+- Watch Mode integration with service mode
 - manual SCM validation through `scripts/validate-service-mode.ps1`
 
-## Active Work
+## Planned Work
 
-### Issue #43: winget publication
-
-Status:
-
-- manifest files exist under `installer/winget/1.0.0`
-- installer URL points at the `v1.0.0` GitHub Release
-- installer SHA-256 matches the release asset
-- `winget validate --manifest .\installer\winget\1.0.0` passes
-- PR submitted: `https://github.com/microsoft/winget-pkgs/pull/364698`
-
-Remaining:
-
-- monitor automated validation in `microsoft/winget-pkgs`
-- run public install smoke after merge
-
-### Epic #40: v1.0 distribution and polish
-
-Mostly complete. It remains open because #43 is still open.
-
-### Epic #45: v1.x background service
-
-Service mode is implemented and validated, but the broader epic remains open for follow-up background-operation polish.
-
-## Planned Features
-
-- public winget installation through `winget install GeziP.KBIntake` after the package PR is merged
-- Authenticode code signing
-- installer option to install/start the Windows Service
+- Windows 11 COM DLL go/no-go decision
+- Documentation pass (template gallery, config reference, CONTRIBUTING)
+- winget publication through `winget install GeziP.KBIntake` after v2.0.0 PR merge
+- Authenticode code signing (requires certificate purchase)
+- installer option to install/start the Windows Service (requires admin elevation)
 - reboot-resume validation for service mode
-- richer configuration editing commands for routing rules
-- improved release notes and checksum verification guidance
-- GitHub Actions dependency updates ahead of Node 20 deprecation
-- future migration tests for any new schema changes
 
 ## Known Limitations
 
@@ -113,6 +145,8 @@ Service mode is implemented and validated, but the broader epic remains open for
 - service install/start requires Administrator PowerShell
 - service reboot-resume is not yet manually validated
 - only local-folder vault targets are implemented
+- TUI watch config editing is basic (cycles from first entry)
+- COM DLL requires admin for HKCR registration
 
 ## Validation Commands
 

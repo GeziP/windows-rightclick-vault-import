@@ -76,11 +76,17 @@ mod tests {
                 import: ImportConfig {
                     max_file_size_mb: 512,
                     inject_frontmatter: true,
+                    language: None,
+                    auto_open_obsidian: false,
                 },
                 agent: AgentConfig {
                     poll_interval_secs: 5,
+                    watch_in_service: false,
                 },
                 routing: Vec::new(),
+                templates: Vec::new(),
+                routing_rules: Vec::new(),
+                watch: Vec::new(),
             },
             db_path,
         }

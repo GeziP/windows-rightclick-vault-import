@@ -1,22 +1,24 @@
 # KBIntake Project Status
 
-Last updated: 2026-04-24
+Last updated: 2026-05-03
 
 ## Summary
 
-KBIntake v1.0.0 is released as a Windows local vault import tool. The release includes a GitHub-hosted NSIS installer, Explorer right-click integration, toast notifications, queue-backed imports, deduplication, undo, vault stats, and optional Windows Service processing.
+KBIntake v2.1.0 is the latest release on branch `v2.0`. All planned features across Phase 1–3 are implemented, plus post-handoff additions (system tray, directory structure preservation, stale manifest handling). v2.1.0 fixed `--tags` frontmatter injection and added tray auto-start to the installer.
 
-Release page:
+Current release:
 
 ```text
-https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
+https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0
 ```
 
 ## What Is Complete
 
+### v1.0.0 Core (released)
+
 - Rust CLI and Windows GUI-subsystem companion binary
 - local config bootstrap under `%LOCALAPPDATA%\kbintake`
-- SQLite schema migrations through schema version 3
+- SQLite schema migrations through schema version 6
 - import queue, items, manifests, and events
 - file scanning for files and directories
 - validation, size limit checks, SHA-256 hashing
@@ -39,80 +41,149 @@ https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0
 - repo-local winget manifest copy
 - English README, Chinese README, install guide, configuration reference
 
-## Validation Completed
+### v2.0.0 Features (branch `v2.0`)
 
-- `cargo fmt --all -- --check`
-- `cargo test --locked`
-- `cargo clippy --all-targets --all-features --locked -- -D warnings`
-- `cargo build --locked`
-- `cargo build --release --locked --bins`
-- Explorer toast/no-console validation through `scripts/validate-explorer-toast.ps1`
-- Windows Service install/start/process/log/stop/uninstall validation through `scripts/validate-service-mode.ps1`
-- installer build through GitHub Actions release workflow
-- release asset upload for `v1.0.0`
-- winget manifest validation with `winget validate --manifest .\installer\winget\1.0.0`
+#### Epic #58: Import Template System
+
+- `[[templates]]` and `[[routing_rules]]` config sections
+- v1 `[[routing]]` compatibility retained
+- template resolution with single-level `base_template` inheritance
+- frontmatter merge/override
+- tag merge/dedupe (case-insensitive)
+- variable interpolation for 9 built-in variables
+- conditional rendering (`{{#if}}` / `{{#else}}`)
+- dry-run template preview
+- `--template` / `-t` CLI flag for manual override
+- `routing_rules.target` wired into actual import and dry-run
+- route-hit visibility in previews, CLI output, and toast notifications
+
+#### Epic #59: Target Default Subfolder
+
+- `default_subfolder` config field on targets
+- priority chain: template subfolder > target default_subfolder > target root
+
+#### Epic #60: TUI Settings
+
+- `kbintake tui` interactive terminal settings
+- Tabbed layout: Targets, Import, Watch, Templates
+- Keyboard shortcuts for all management operations
+- Text input overlay for adding targets and watch paths
+- Edit mode for `obsidian_vault` and watch config fields
+- All labels localized
+
+#### Epic #61: zh-CN Localization
+
+- `[import].language` config option (`"en"` or `"zh-CN"`)
+- All CLI output, toast notifications, and error messages translated
+- TUI labels translated
+- Explorer right-click menu text localized (e.g. "添加到知识库" for zh-CN)
+
+#### Epic #62: Watch Mode
+
+- `kbintake watch` CLI command
+- `[[watch]]` config section for persistent watch paths
+- `notify` crate for OS-level file events
+- Debounce, extension filter, template binding per watch config
+- Locked-file retry with backoff
+- Windows Service integration via `agent.watch_in_service`
+- Directory structure preservation: files imported into matching subdirectories with original names
+- Startup scan: imports existing files not yet tracked in manifest
+- Stale manifest detection: re-imports when vault file was deleted
+
+#### Epic #63: Obsidian URI Integration
+
+- `kbintake obsidian open --vault <name> <path>` command
+- Per-target `obsidian_vault` config field
+- `[import].auto_open_obsidian` global flag
+- `--open` CLI flag for per-import override
+- Auto-open after successful markdown import
+
+#### Epic #64: Quick Tag Injection
+
+- `--tags "urgent,alpha"` CLI flag
+- Tags merged with template tags (case-insensitive dedup)
+- DB migration 005: `cli_tags` column
+
+#### Epic #65: Vault Audit
+
+- `kbintake vault audit [--target] [--fix] [--json]` command
+- Detects: orphan files, missing files, duplicate records, malformed frontmatter
+- `--fix` cleans manifest records without deleting vault files
+- `--json` structured output
+
+#### Epic #66: Clipboard Import
+
+- `--clipboard` CLI flag reads file paths from Windows clipboard
+- Win32 `DataExchange` API for clipboard text access
+- Combinable with `--tags`, `--process`, `--dry-run`
+
+#### Epic #57: Windows 11 Native Context Menu
+
+- COM DLL crate (`kbintake-com/`) with `IExplorerCommand` implementation
+- Top-level context menu registration (not under "Show more options")
+- Icon support via `GetIcon` returning `kbintake.ico` path
+- GHA validation workflow for registry operations
+- Validated on Windows 11 physical hardware
+
+#### Default Templates (v2.1.0)
+
+- 5 built-in templates (inbox, notes, documents, media, code) generated on first run
+- 4 routing rules matching common file extensions to templates
+- `inbox` as fallback for unmatched files
+- Existing configs untouched; reset by deleting `config.toml`
+
+#### Post-handoff Additions (no epic number)
+
+- **System Tray Icon** (`kbintakew.exe tray`):
+  - Shell_NotifyIconW with right-click context menu (Settings, Auto-start, Exit)
+  - `src/tray/mod.rs`: hidden window + message loop + WndProc
+  - `src/tray/autostart.rs`: HKCU\Run registry management for login persistence
+  - Settings launches TUI via ShellExecuteW (avoids antivirus alerts)
+  - File-based logging to `%LOCALAPPDATA%\kbintake\logs\`
+- **Watch Directory Structure Preservation**:
+  - DB migration 006: `items.import_subfolder` column
+  - Files imported with original names into matching subdirectories
+  - `LocalFolderAdapter::store_copy_to()` for exact-path copy
+- **Stale Manifest Handling**:
+  - Dedup verifies stored file still exists before marking duplicate
+  - Deleted vault files trigger automatic re-import
+
+## Validation State
+
+```powershell
+cargo test --locked                            # 171 tests (119 unit + 52 integration)
+cargo clippy --all-targets --all-features -- -D warnings  # clean
+cargo fmt --all -- --check                     # clean
+cargo build --release --locked --bins          # kbintake + kbintakew
+```
+
+## Release History
+
+- `v2.1.0` (2026-05-03) — Fix `--tags` frontmatter injection, tray autostart in installer, winget 2.0.0 manifest, default templates for first-run experience
+- `v2.0.0` (2026-04-30) — Templates, Watch Mode, TUI, localization, Win11 context menu, system tray
+- `v1.0.1` — Static CRT, installer validation workflow
+- `v1.0.0` — Initial release
 
 ## Open Work
 
-### Winget publication
+### Windows 11 Physical Validation (#57)
 
-Issue: #43
+- COM DLL validated on physical hardware: install, top-level menu, icon, import, uninstall
+- Remaining: go/no-go decision
 
-Current status:
+### Documentation (#67)
 
-- release URL exists
-- installer SHA-256 is recorded in `installer/winget/1.0.0`
-- manifest validation passes
-- PR submitted to `microsoft/winget-pkgs`: `https://github.com/microsoft/winget-pkgs/pull/364698`
+- Configuration reference updated for v2.0
+- Template gallery docs pending (#69, #73)
+- Config.toml reference docs pending (#68, #72)
+- CONTRIBUTING.md pending (#70)
 
-Remaining:
+### Winget Publication (#43)
 
-- monitor winget-pkgs automated validation
-- complete public `winget install GeziP.KBIntake` smoke test after merge
+- PR submitted: `https://github.com/microsoft/winget-pkgs/pull/364698`
+- Pending merge
 
-### Distribution hardening
-
-Planned:
+### Distribution Hardening
 
 - Authenticode signing for release binaries
-- clearer SmartScreen guidance in release notes
-- possible installer option to install/start the Windows Service
-
-### Service validation
-
-Implemented:
-
-- service install/start/status/stop/uninstall
-- background queue processing
-- service log creation
-
-Remaining:
-
-- reboot-resume smoke validation
-- optional installer integration for service setup
-
-### Maintenance
-
-Planned:
-
-- keep GitHub Actions dependencies current
-- update actions before Node 20 runner deprecation becomes blocking
-- continue adding migration coverage before future schema changes
-
-## Release Assets
-
-The `v1.0.0` GitHub Release publishes:
-
-- `KBIntake-Setup.exe`
-- `kbintake.exe`
-- `kbintakew.exe`
-- `kbintake.ico`
-- `SHA256SUMS.txt`
-
-Users should prefer `KBIntake-Setup.exe`.
-
-## Repository Notes
-
-- `dist/` is intentionally ignored and used only for local release staging.
-- runtime databases, logs, and machine-specific registry exports should not be committed.
-- service validation requires an elevated Administrator PowerShell session.
+- SmartScreen guidance

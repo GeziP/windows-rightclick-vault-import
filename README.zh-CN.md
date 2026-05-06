@@ -2,9 +2,9 @@
 
 KBIntake 是一个面向 Windows 的本地知识库导入工具。它可以把文件或文件夹从 PowerShell 或 Windows Explorer 右键菜单导入到本地 vault，并用 SQLite 记录每一次导入、去重、失败和撤销信息。
 
-当前版本：`v1.0.0`
+当前版本：`v2.1.0`
 
-- 下载地址：<https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0>
+- 下载地址：<https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0>
 - 英文 README：[README.md](README.md)
 
 ## 这个项目解决什么问题
@@ -35,7 +35,7 @@ C:\Users\<你>\Documents\KBIntakeVault
 
 ### 推荐方式
 
-1. 打开 [v1.0.0 Release 页面](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v1.0.0)。
+1. 打开 [v2.1.0 Release 页面](https://github.com/GeziP/windows-rightclick-vault-import/releases/tag/v2.1.0)。
 2. 下载 `KBIntake-Setup.exe`。
 3. 运行安装包。
 4. 打开新的 PowerShell，执行：
@@ -82,9 +82,10 @@ winget install GeziP.KBIntake
 ### Explorer 右键方式
 
 1. 在资源管理器中右键一个文件或文件夹。
-2. 选择 KBIntake 菜单项。
-3. 导入完成后会出现 Windows toast 通知。
-4. 打开 PowerShell 查看任务：
+2. 选择 KBIntake 菜单项展开子菜单。
+3. 选择"导入处理"（立即处理）、"仅入队"（稍后处理）或"设置"（打开设置界面）。
+4. 导入完成后会出现 Windows toast 通知。
+5. 打开 PowerShell 查看任务：
 
 ```powershell
 kbintake jobs list
@@ -98,9 +99,54 @@ kbintake import --process C:\path\to\note.md
 kbintake jobs list
 ```
 
+## Obsidian 集成
+
+KBIntake 可以把文件直接导入到 Obsidian vault，并在导入后自动打开笔记。
+
+### 配置步骤
+
+1. 添加 Obsidian vault 为 KBIntake 目标：
+
+```powershell
+kbintake targets add obsidian "C:\Users\<你>\Documents\你的Vault名称"
+kbintake targets set-default obsidian
+```
+
+2. 编辑 `%LOCALAPPDATA%\kbintake\config.toml`，给目标添加 `obsidian_vault` 并开启自动打开：
+
+```toml
+[[targets]]
+target_id = "obsidian"
+name = "obsidian"
+root_path = 'C:\Users\<你>\Documents\你的Vault名称'
+status = "active"
+obsidian_vault = "你的Vault名称"
+
+[import]
+auto_open_obsidian = true
+```
+
+`obsidian_vault` 必须和 Obsidian 侧边栏显示的 vault 名称一致。
+
+### 使用方法
+
+```powershell
+# 导入并在 Obsidian 中打开
+kbintake import 笔记.md --process --open
+
+# 导入但不打开
+kbintake import 笔记.md --process
+
+# 从剪贴板导入
+kbintake import --clipboard --process
+```
+
+首次运行时，KBIntake 会自动生成默认模板。导入的 `.md` 文件会进入 `vault/notes/`，PDF 进入 `vault/documents/`，代码文件进入 `vault/snippets/` 等。完整模板列表见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
+
 ## 已有功能
 
-- Explorer 文件和文件夹右键导入
+- Explorer 级联右键菜单（导入处理 / 仅入队 / 设置）
+- Windows 11 原生顶级右键菜单（COM DLL）
 - Explorer 导入不弹控制台窗口
 - 成功、重复、失败场景的 Windows toast 通知
 - PowerShell 导入命令
@@ -108,13 +154,22 @@ kbintake jobs list
 - SHA-256 哈希和按目标 vault 去重
 - 文件名冲突时安全改名，不覆盖已有文件
 - 多 vault target 管理
-- 根据扩展名路由到不同 target
-- Markdown 导入时自动写入 KBIntake frontmatter
+- 导入模板系统（变量插值、条件渲染、继承）
+- v2 多条件路由规则，绑定模板
+- 每个目标可配置默认子文件夹
+- Markdown 导入时自动写入 frontmatter（支持模板自定义字段）
+- `--tags` 快速标签注入，与模板标签合并
+- `--clipboard` 从 Windows 剪贴板读取文件路径并导入
 - 可关闭 Markdown frontmatter 注入
 - dry-run 预览，支持表格和 JSON
 - jobs list/show/retry/undo
 - 基于哈希的安全撤销，避免删除被修改过的文件
 - vault stats 统计
+- `vault audit` 审计命令（检测孤立、缺失、重复、异常 frontmatter）
+- Watch Mode：监控目录自动导入新文件
+- TUI 交互式设置界面（`kbintake tui`）
+- Obsidian URI 集成（导入后自动打开笔记）
+- 简体中文本地化（zh-CN），包括 CLI 输出、toast 通知、TUI 界面和 Explorer 右键菜单文字
 - Windows Service 后台处理队列
 - NSIS 单文件安装包
 - GitHub Actions release 构建和发布资产
@@ -125,7 +180,7 @@ kbintake jobs list
 ```text
 kbintake --version
 kbintake doctor [--fix] [--migrate]
-kbintake import [--target <target>] [--process] [--dry-run] [--json] <path...>
+kbintake import [--target <target>] [--template <name>] [--tags "a,b"] [--clipboard] [--process] [--dry-run] [--json] [--open] <path...>
 kbintake jobs list [--status <status>] [--limit <n>] [--json] [--table]
 kbintake jobs show <batch-id> [--json] [--table]
 kbintake jobs retry <batch-id>
@@ -134,6 +189,10 @@ kbintake targets list [--include-archived]
 kbintake targets add <name> <path>
 kbintake targets set-default <target>
 kbintake vault stats [--target <target>] [--json]
+kbintake vault audit [--target <target>] [--fix] [--json]
+kbintake watch [--path <dir>]
+kbintake tui
+kbintake obsidian open --vault <name> <note-path>
 kbintake explorer install
 kbintake explorer uninstall
 kbintake service install
@@ -153,10 +212,15 @@ kbintake service status
 
 主要配置：
 
-- `[[targets]]`：导入目标 vault
-- `[[routing]]`：按扩展名路由，例如把 PDF 发到 archive target
+- `[[targets]]`：导入目标 vault（支持 `default_subfolder`、`obsidian_vault`）
+- `[[templates]]`：导入模板（子文件夹、标签、frontmatter）
+- `[[routing_rules]]`：v2 多条件路由，绑定模板
+- `[[routing]]`：v1 按扩展名路由（仍支持）
+- `[[watch]]`：自动监控导入的目录配置
 - `[import].max_file_size_mb`：最大文件大小限制
 - `[import].inject_frontmatter`：是否给 Markdown 注入 metadata
+- `[import].language`：输出语言（`"en"` 或 `"zh-CN"`），同时控制 Explorer 右键菜单文字
+- `[import].auto_open_obsidian`：导入后自动在 Obsidian 中打开
 - `[agent].poll_interval_secs`：后台服务轮询间隔
 
 查看当前配置：
@@ -231,12 +295,11 @@ Copy-Item .\kbintake\assets\kbintake.ico .\dist\kbintake.ico -Force
 
 ## 待开发和后续计划
 
+- v2.0 发布：安装包更新、版本号升级、CHANGELOG、发布说明
+- Windows 11 COM DLL 物理机验证
 - 跟进 `microsoft/winget-pkgs` PR 合并
-- 合并后完成 public winget install smoke test
 - 给发布二进制做 Authenticode 签名，降低 SmartScreen 提示
-- 在安装器里提供安装并启动 Windows Service 的选项
+- 文档更新（模板示例库、配置参考）
 - 补做 service reboot-resume 验证
-- 更新 GitHub Actions，避开 Node 20 deprecation
-- 继续增强被动后台导入体验
 
 更多状态见：[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md)

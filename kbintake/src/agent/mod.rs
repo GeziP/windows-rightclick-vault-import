@@ -1,4 +1,5 @@
 pub mod scheduler;
+pub mod watcher;
 pub mod worker;
 
 use anyhow::Result;

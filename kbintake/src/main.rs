@@ -33,14 +33,28 @@ fn main() -> ExitCode {
             .and_then(|app| agent::run_agent(&app))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Agent, err)),
+        Commands::Watch { path } => app::App::bootstrap_at(app_data_dir)
+            .and_then(|app| {
+                let paths = if path.is_empty() { None } else { Some(path) };
+                cli::handle_watch(&app, paths)
+            })
+            .map_err(|err| (CommandKind::Watch, err)),
         Commands::Import {
             target,
+            template,
+            tags,
             process,
             dry_run,
             json,
+            open,
+            clipboard,
             paths,
         } => app::App::bootstrap_at(app_data_dir)
-            .and_then(|app| cli::handle_import_command(&app, target, process, dry_run, json, paths))
+            .and_then(|app| {
+                cli::handle_import_command(
+                    &app, target, template, tags, process, dry_run, json, open, clipboard, paths,
+                )
+            })
             .map_err(|err| (CommandKind::Import, err)),
         Commands::Jobs { command } => {
             let kind = CommandKind::Jobs(command_kind(&command));
@@ -63,9 +77,18 @@ fn main() -> ExitCode {
             .and_then(|app| cli::handle_vault(&app, command))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Vault, err)),
-        Commands::Explorer { command } => cli::handle_explorer(command)
-            .map(|()| exit_codes::SUCCESS)
-            .map_err(|err| (CommandKind::Explorer, err)),
+        Commands::Explorer { command } => {
+            let data_dir = app_data_dir
+                .clone()
+                .unwrap_or_else(kbintake::config::default_app_data_dir);
+            let lang = kbintake::config::AppConfig::load_or_init_in(data_dir)
+                .ok()
+                .map(|config| config.language().to_string())
+                .unwrap_or_else(|| "en".to_string());
+            cli::handle_explorer(command, &lang)
+                .map(|()| exit_codes::SUCCESS)
+                .map_err(|err| (CommandKind::Explorer, err))
+        }
         Commands::Service { command } => {
             handle_service_command(command, app_data_dir).map_err(|err| (CommandKind::Service, err))
         }
@@ -76,6 +99,26 @@ fn main() -> ExitCode {
             .and_then(|app| cli::handle_config_show(&app))
             .map(|()| exit_codes::SUCCESS)
             .map_err(|err| (CommandKind::Config, err)),
+        Commands::Tui => app::App::bootstrap_at(app_data_dir)
+            .and_then(|app| kbintake::tui::run_settings_tui(app.config))
+            .map(|()| exit_codes::SUCCESS)
+            .map_err(|err| (CommandKind::Config, err)),
+        Commands::Tray { .. } => {
+            let lang = kbintake::config::AppConfig::load_or_init_in(
+                app_data_dir.unwrap_or_else(kbintake::config::default_app_data_dir),
+            )
+            .ok()
+            .map(|c| c.language().to_string())
+            .unwrap_or_else(|| "en".to_string());
+            eprintln!("{}", kbintake::i18n::tr("tray.console_hint", &lang));
+            Ok(exit_codes::GENERAL_ERROR)
+        }
+        Commands::Obsidian { command } => {
+            let kind = CommandKind::Config;
+            cli::handle_obsidian(command)
+                .map(|()| exit_codes::SUCCESS)
+                .map_err(|err| (kind, err))
+        }
         Commands::Version => {
             println!("kbintake {}", env!("CARGO_PKG_VERSION"));
             Ok(exit_codes::SUCCESS)
@@ -91,6 +134,7 @@ fn main() -> ExitCode {
 #[derive(Debug, Clone, Copy)]
 enum CommandKind {
     Agent,
+    Watch,
     Import,
     Jobs(JobKind),
     Targets(TargetKind),
@@ -224,6 +268,7 @@ fn classify_error(kind: CommandKind, err: &Error) -> i32 {
         || message.contains("target already configured")
         || message.contains("target name")
         || message.contains("not a directory")
+        || message.contains("clipboard")
     {
         return exit_codes::INVALID_ARGUMENTS;
     }

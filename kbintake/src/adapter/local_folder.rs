@@ -20,11 +20,18 @@ impl LocalFolderAdapter {
         copier::copy_to_path(source, &destination)
     }
 
+    pub fn store_copy_to(&self, source: &Path, dest: &Path) -> Result<PathBuf> {
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        copier::copy_to_path(source, dest)
+    }
+
     pub fn preview_destination(&self, source_name: &str) -> PathBuf {
         self.available_destination(source_name)
     }
 
-    fn available_destination(&self, source_name: &str) -> PathBuf {
+    pub fn available_destination(&self, source_name: &str) -> PathBuf {
         let candidate = self.root_path.join(source_name);
         if !candidate.exists() {
             return candidate;
